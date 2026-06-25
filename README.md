@@ -482,11 +482,11 @@ The Python-reference side of these tests usually requires more time-consuming se
 
 All performance metrics in this section were measured on Ubuntu with the CUDA backend.
 
-audio.cpp already shows some genuinely exciting wins against the matching Python reference paths, especially on the TTS side, even when using the original model weights without quantization.
+audio.cpp already shows some genuinely exciting wins against the matching Python reference paths, especially on the TTS side, even when using the original model weights without quantization. The headline win is wall time: several TTS paths run **1.8x-5.0x faster** than Python while cutting end-to-end latency by **45%-80%**.
 
-- In one-shot runs, several TTS-family models already land far ahead of Python, including `pocket tts` at **+72.80%**, `miotts` at **+63.39%**, `moss tts` at **+57.07%**, `qwen3 tts` at **+45.34%**, and `vevo2` at **+80.11%**.
-- In long-lived-session runs, where the same loaded session serves multiple requests in sequence, the gains stay strong: `pocket tts` reaches **+68.91%**, `qwen3 tts` hits **+63.47%**, `moss tts` reaches **+62.35%**, `miotts` lands at **+56.22%**, and `vevo2` still holds **+42.72%**.
-- In long-form runs on the shared 6,026-character, 1,028-word passage, the strongest Python-relative wins still show up clearly: `pocket tts` reaches **+68.23%**, `qwen3 tts` hits **+67.33%**, `vevo2` still holds **+43.51%**, and `chatterbox` lands at **+36.83%**.
+- In one-shot runs, several TTS-family models already land far ahead of Python: `pocket tts` is **3.68x faster** with **72.80% less wall time**, `miotts` is **2.73x faster** with **63.39% less wall time**, `moss tts` is **2.33x faster** with **57.07% less wall time**, `qwen3 tts` is **1.83x faster** with **45.34% less wall time**, and `vevo2` is **5.03x faster** with **80.11% less wall time**.
+- In long-lived-session runs, where the same loaded session serves multiple requests in sequence, the gains stay strong: `pocket tts` is **3.22x faster** with **68.91% less wall time**, `qwen3 tts` is **2.74x faster** with **63.47% less wall time**, `moss tts` is **2.66x faster** with **62.35% less wall time**, `miotts` is **2.28x faster** with **56.22% less wall time**, and `vevo2` is **1.75x faster** with **42.72% less wall time**.
+- In long-form runs on the shared 6,026-character, 1,028-word passage, the strongest Python-relative wins still show up clearly: `pocket tts` is **3.15x faster** with **68.23% less wall time**, `qwen3 tts` is **3.06x faster** with **67.33% less wall time**, `vevo2` is **1.77x faster** with **43.51% less wall time**, and `chatterbox` is **1.58x faster** with **36.83% less wall time**.
 - These long-lived-session numbers are especially important for real applications, because they reflect the common case where model load, cached state, and reusable runtime setup are amortized across many requests.
 - The remaining negative bars are useful too: they spotlight exactly where more optimization work is still worth doing.
 
