@@ -22,25 +22,34 @@ Common options:
 
 ## Chatterbox
 
-Chatterbox is a voice-clone TTS model. The upstream Chatterbox family also documents paralinguistic tag tokens in newer variants, but the current audio.cpp integration exposes the voice-clone path rather than a separate tag-control interface.
+Chatterbox is a voice-clone TTS model with an audio-to-audio voice-conversion path. The upstream Chatterbox family also documents paralinguistic tag tokens in newer variants, but the current audio.cpp integration exposes voice cloning and voice conversion rather than a separate tag-control interface.
 
 | Field | Value |
 |---|---|
 | Family | `chatterbox` |
 | Model directory | `models/chatterbox` |
-| Task | `clon` |
+| Tasks | `clon`, `vc` |
 | Modes | `offline` |
 | Languages | `ar`, `da`, `de`, `el`, `en`, `es`, `fi`, `fr`, `hi`, `it`, `ko`, `ms`, `nl`, `no`, `pl`, `pt`, `sv`, `sw`, `tr` |
-| Voice input | Required reference WAV through `--voice-ref` |
+| Voice input | Required reference WAV through `--voice-ref`; VC also requires source audio through `--audio` |
 | Built-in voices | Not exposed by this integration |
+
+Voice clone:
 
 ```bash
 audiocpp_cli --task clon --family chatterbox --model models/chatterbox --backend cuda --text "Hello from Chatterbox." --voice-ref assets/resources/b.wav --out out.wav
 ```
 
+Voice conversion:
+
+```bash
+audiocpp_cli --task vc --family chatterbox --model models/chatterbox --backend cuda --audio assets/resources/a.wav --voice-ref assets/resources/b.wav --out converted.wav
+```
+
 | Option | Values | Default | Meaning |
 |---|---|---:|---|
-| `--voice-ref` | WAV path | required | Reference speaker audio. |
+| `--audio` | WAV path | required for `vc` | Source speech for voice conversion. |
+| `--voice-ref` | WAV path | required | Reference speaker audio for cloning, or target speaker audio for voice conversion. |
 | `--language` | language code | `en` | Text language. |
 | `--text-chunk-size` | integer chars | `128` | Long-form chunk size. |
 | `--guidance-scale` | float | `0.5` | CFG strength. |

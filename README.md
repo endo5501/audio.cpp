@@ -47,7 +47,7 @@ audio.cpp would not be moving this quickly without generous contributors bringin
 | Family | Task | Supported language(s) | Supported variant(s) in this repo |
 |---|---|---|---|
 | **ace_step** | music generation, music editing | 50+ langs | ACE-Step 1.5 Turbo and Base with acestep-5Hz-lm-1.7B |
-| **chatterbox** | TTS, voice cloning | ar, da, de, el, en, es, fi, fr, hi, it, ko, ms, nl, no, pl, pt, sv, sw, tr | Chatterbox with 0.5B backbone |
+| **chatterbox** | TTS, voice cloning, voice conversion | ar, da, de, el, en, es, fi, fr, hi, it, ko, ms, nl, no, pl, pt, sv, sw, tr | Chatterbox with 0.5B backbone |
 | **citrinet_asr** | ASR | en | Citrinet-256 |
 | **heartmula** | music generation | zh, en, ja, ko, es | HeartMuLa-oss-3B with HeartCodec-oss |
 | **higgs_audio_stt** | ASR | en | Higgs Audio v3 STT |
