@@ -242,12 +242,12 @@ HttpResponse chunked_audio_response(std::function<void(HttpStreamWriter &)> stre
     return response;
 }
 
-bool is_wav_upload_filename(const std::string & filename) {
+bool is_supported_audio_upload_filename(const std::string & filename) {
     std::string ext = std::filesystem::path(filename).extension().string();
     for (char & ch : ext) {
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     }
-    return ext.empty() || ext == ".wav";
+    return ext.empty() || ext == ".wav" || ext == ".mp3" || ext == ".mpa" || ext == ".mpeg";
 }
 
 double elapsed_ms(Clock::time_point started) {
@@ -1006,10 +1006,10 @@ HttpResponse ServerState::handle_transcription_multipart(const std::string & bod
     if (model_id.empty()) {
         throw std::runtime_error("multipart transcription request requires a 'model' field");
     }
-    if (!is_wav_upload_filename(file_part->filename)) {
+    if (!is_supported_audio_upload_filename(file_part->filename)) {
         return error_response(
             400,
-            "only WAV audio uploads are currently supported for transcription; MP3 support is planned",
+            "unsupported transcription audio upload format; supported formats: WAV, MP3",
             "invalid_request_error");
     }
 
