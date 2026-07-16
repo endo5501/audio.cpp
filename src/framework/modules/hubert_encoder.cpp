@@ -414,8 +414,18 @@ HubertEncoderComponent HubertEncoderComponent::load_from_safetensors(
     const std::filesystem::path & checkpoint_path,
     core::BackendConfig backend,
     HubertEncoderConfig config) {
-    validate_config(config);
     const auto source = engine::assets::open_tensor_source(checkpoint_path);
+    return load_from_tensor_source(std::move(source), std::move(backend), std::move(config));
+}
+
+HubertEncoderComponent HubertEncoderComponent::load_from_tensor_source(
+    std::shared_ptr<const engine::assets::TensorSource> source,
+    core::BackendConfig backend,
+    HubertEncoderConfig config) {
+    if (source == nullptr) {
+        throw std::runtime_error("HuBERT tensor source is missing");
+    }
+    validate_config(config);
     auto weights = std::make_shared<HubertEncoderWeights>();
     weights->config = std::move(config);
     weights->source_path = source->source_path();

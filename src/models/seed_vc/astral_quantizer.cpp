@@ -1,5 +1,7 @@
 #include "engine/models/seed_vc/astral_quantizer.h"
 
+#include "tensor_store_internal.h"
+
 #include "engine/framework/core/backend.h"
 #include "engine/framework/modules/activation_modules.h"
 #include "engine/framework/modules/conv_modules.h"
@@ -21,7 +23,7 @@ namespace engine::models::seed_vc {
 namespace {
 
 const engine::core::TensorValue & require_tensor(
-    const SeedVcWeightBundle & weights,
+    const SeedVcAstralWeights & weights,
     const std::string & name) {
     const auto it = weights.tensors.find(name);
     if (it == weights.tensors.end()) {
@@ -173,7 +175,7 @@ struct AstralWeights {
 };
 
 AstralWeights load_astral_weights(
-    const SeedVcWeightBundle & weights,
+    const SeedVcAstralWeights & weights,
     const std::string & prefix,
     int64_t input_channels,
     int64_t channels,
@@ -295,7 +297,7 @@ std::vector<int32_t> pack_bsq_indices(
 class AstralRunner {
 public:
     AstralRunner(
-        const SeedVcWeightBundle & weights,
+        const SeedVcAstralWeights & weights,
         std::string prefix,
         int64_t input_channels,
         int64_t channels,
@@ -402,7 +404,7 @@ private:
         tokens_ = tokens;
     }
 
-    const SeedVcWeightBundle & source_;
+    const SeedVcAstralWeights & source_;
     AstralWeights graph_weights_;
     int64_t input_channels_ = 0;
     int64_t channels_ = 0;
@@ -425,7 +427,7 @@ struct SeedVcAstralQuantizer::State {
 };
 
 SeedVcAstralQuantizer::SeedVcAstralQuantizer(
-    std::shared_ptr<const SeedVcWeightBundle> weights,
+    std::shared_ptr<const SeedVcAstralWeights> weights,
     std::string prefix,
     int64_t input_channels,
     int64_t channels,

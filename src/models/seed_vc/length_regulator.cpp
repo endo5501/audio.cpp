@@ -1,5 +1,7 @@
 #include "engine/models/seed_vc/length_regulator.h"
 
+#include "tensor_store_internal.h"
+
 #include "engine/framework/core/backend.h"
 #include "engine/framework/modules/conv_modules.h"
 #include "engine/framework/modules/linear_module.h"
@@ -20,7 +22,7 @@ namespace engine::models::seed_vc {
 namespace {
 
 const engine::core::TensorValue & require_tensor(
-    const SeedVcWeightBundle & weights,
+    const SeedVcTensorStore & weights,
     const std::string & name) {
     const auto it = weights.tensors.find(name);
     if (it == weights.tensors.end()) {
@@ -30,7 +32,7 @@ const engine::core::TensorValue & require_tensor(
 }
 
 const engine::core::TensorValue * find_tensor(
-    const SeedVcWeightBundle & weights,
+    const SeedVcTensorStore & weights,
     const std::string & name) {
     const auto it = weights.tensors.find(name);
     return it == weights.tensors.end() ? nullptr : &it->second;
@@ -178,7 +180,7 @@ struct V1LengthRegulatorWeights {
 };
 
 CfmLengthRegulatorWeights load_cfm_weights(
-    const SeedVcWeightBundle & weights,
+    const SeedVcTensorStore & weights,
     const std::string & prefix,
     int64_t codebook_size,
     int64_t channels) {
@@ -219,7 +221,7 @@ CfmLengthRegulatorWeights load_cfm_weights(
 }
 
 V1LengthRegulatorWeights load_v1_weights(
-    const SeedVcWeightBundle & weights,
+    const SeedVcTensorStore & weights,
     const std::string & prefix,
     int64_t input_channels,
     int64_t channels,
@@ -768,7 +770,7 @@ struct SeedVcV1LengthRegulator::State {
 };
 
 SeedVcDiscreteLengthRegulator::SeedVcDiscreteLengthRegulator(
-    std::shared_ptr<const SeedVcWeightBundle> weights,
+    std::shared_ptr<const SeedVcV2ArWeights> weights,
     std::string prefix)
     : weights_(std::move(weights)),
       prefix_(std::move(prefix)),
@@ -813,7 +815,7 @@ SeedVcLengthRegulatorOutput SeedVcDiscreteLengthRegulator::run(
 }
 
 SeedVcCfmLengthRegulator::SeedVcCfmLengthRegulator(
-    std::shared_ptr<const SeedVcWeightBundle> weights,
+    std::shared_ptr<const SeedVcV2CfmWeights> weights,
     std::string prefix)
     : weights_(std::move(weights)),
       prefix_(std::move(prefix)),
@@ -860,7 +862,7 @@ SeedVcLengthRegulatorOutput SeedVcCfmLengthRegulator::run(
 }
 
 SeedVcV1LengthRegulator::SeedVcV1LengthRegulator(
-    std::shared_ptr<const SeedVcWeightBundle> weights,
+    std::shared_ptr<const SeedVcV1ModelWeights> weights,
     std::string prefix)
     : weights_(std::move(weights)),
       prefix_(std::move(prefix)),

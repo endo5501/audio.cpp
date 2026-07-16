@@ -1,5 +1,7 @@
 #include "engine/models/seed_vc/v2_cfm.h"
 
+#include "tensor_store_internal.h"
+
 #include "engine/framework/core/backend.h"
 #include "engine/framework/modules/activation_modules.h"
 #include "engine/framework/modules/linear_module.h"
@@ -25,7 +27,7 @@ namespace {
 using engine::core::TensorShape;
 using engine::core::TensorValue;
 
-const TensorValue & require_tensor(const SeedVcWeightBundle & weights, const std::string & name) {
+const TensorValue & require_tensor(const SeedVcV2CfmWeights & weights, const std::string & name) {
     const auto it = weights.tensors.find(name);
     if (it == weights.tensors.end()) {
         throw std::runtime_error("Seed-VC V2 CFM missing tensor: " + name);
@@ -33,19 +35,19 @@ const TensorValue & require_tensor(const SeedVcWeightBundle & weights, const std
     return it->second;
 }
 
-engine::modules::LinearWeights linear_weights(const SeedVcWeightBundle & weights, const std::string & prefix) {
+engine::modules::LinearWeights linear_weights(const SeedVcV2CfmWeights & weights, const std::string & prefix) {
     return engine::modules::LinearWeights{
         require_tensor(weights, prefix + ".weight"),
         require_tensor(weights, prefix + ".bias")};
 }
 
-engine::modules::LinearWeights linear_weights_no_bias(const SeedVcWeightBundle & weights, const std::string & prefix) {
+engine::modules::LinearWeights linear_weights_no_bias(const SeedVcV2CfmWeights & weights, const std::string & prefix) {
     return engine::modules::LinearWeights{
         require_tensor(weights, prefix + ".weight"),
         std::nullopt};
 }
 
-engine::modules::NormWeights rms_weight(const SeedVcWeightBundle & weights, const std::string & name) {
+engine::modules::NormWeights rms_weight(const SeedVcV2CfmWeights & weights, const std::string & name) {
     return engine::modules::NormWeights{require_tensor(weights, name), std::nullopt};
 }
 
@@ -135,7 +137,7 @@ struct CfmWeights {
     engine::modules::NormWeights final_norm;
 };
 
-CfmWeights load_cfm_weights(const SeedVcWeightBundle & weights, int64_t layers) {
+CfmWeights load_cfm_weights(const SeedVcV2CfmWeights & weights, int64_t layers) {
     const std::string root = "cfm.estimator.";
     CfmWeights out;
     out.cond_projection = linear_weights(weights, root + "cond_projection");
@@ -353,7 +355,7 @@ TensorValue build_estimator_graph(
 class CfmEstimatorRunner {
 public:
     CfmEstimatorRunner(
-        const SeedVcWeightBundle & source,
+        const SeedVcV2CfmWeights & source,
         SeedVcV2DitConfig config)
         : source_(source),
           config_(std::move(config)),
@@ -482,7 +484,7 @@ private:
         frames_ = frames;
     }
 
-    const SeedVcWeightBundle & source_;
+    const SeedVcV2CfmWeights & source_;
     SeedVcV2DitConfig config_;
     CfmWeights weights_;
     std::mutex mutex_;
@@ -635,7 +637,7 @@ struct SeedVcV2CfmEstimator::State {
 };
 
 SeedVcV2CfmEstimator::SeedVcV2CfmEstimator(
-    std::shared_ptr<const SeedVcWeightBundle> weights,
+    std::shared_ptr<const SeedVcV2CfmWeights> weights,
     SeedVcV2DitConfig config)
     : weights_(std::move(weights)),
       config_(std::move(config)),

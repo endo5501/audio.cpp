@@ -1,7 +1,6 @@
 #pragma once
 
 #include "engine/framework/modules/whisper_embedding.h"
-#include "engine/models/seed_vc/weight_bundle.h"
 
 #include <cstdint>
 #include <memory>
@@ -9,10 +8,12 @@
 
 namespace engine::models::seed_vc {
 
+struct SeedVcWhisperEncoderWeights;
+
 class SeedVcWhisperContentEncoder {
 public:
     SeedVcWhisperContentEncoder() = default;
-    explicit SeedVcWhisperContentEncoder(std::shared_ptr<const SeedVcWeightBundle> weights);
+    explicit SeedVcWhisperContentEncoder(std::shared_ptr<const SeedVcWhisperEncoderWeights> weights);
     ~SeedVcWhisperContentEncoder();
 
     SeedVcWhisperContentEncoder(SeedVcWhisperContentEncoder &&) noexcept;
@@ -28,7 +29,7 @@ public:
 private:
     struct State;
 
-    std::shared_ptr<const SeedVcWeightBundle> weights_;
+    std::shared_ptr<const SeedVcWhisperEncoderWeights> weights_;
     engine::modules::WhisperEmbeddingConfig config_;
     std::shared_ptr<State> state_;
 };

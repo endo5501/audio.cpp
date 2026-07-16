@@ -1,5 +1,7 @@
 #include "engine/models/seed_vc/rmvpe.h"
 
+#include "tensor_store_internal.h"
+
 #include "engine/framework/audio/dsp.h"
 #include "engine/framework/core/backend.h"
 #include "engine/framework/debug/profiler.h"
@@ -51,7 +53,7 @@ struct RmvpeGruOutputs {
     TensorValue final_hidden;
 };
 
-const TensorValue & require_tensor(const SeedVcWeightBundle & weights, const std::string & name) {
+const TensorValue & require_tensor(const SeedVcRmvpeWeights & weights, const std::string & name) {
     const auto it = weights.tensors.find(name);
     if (it == weights.tensors.end()) {
         throw std::runtime_error("Seed-VC RMVPE missing tensor: " + name);
@@ -96,7 +98,7 @@ TensorValue slice_axis(
 }
 
 engine::modules::Conv2dWeights conv2d_weights(
-    const SeedVcWeightBundle & weights,
+    const SeedVcRmvpeWeights & weights,
     const std::string & prefix,
     bool bias) {
     return {
@@ -105,7 +107,7 @@ engine::modules::Conv2dWeights conv2d_weights(
 }
 
 engine::modules::LinearWeights linear_weights(
-    const SeedVcWeightBundle & weights,
+    const SeedVcRmvpeWeights & weights,
     const std::string & prefix,
     bool bias) {
     return {
@@ -114,7 +116,7 @@ engine::modules::LinearWeights linear_weights(
 }
 
 engine::modules::LinearWeights linear_weights(
-    const SeedVcWeightBundle & weights,
+    const SeedVcRmvpeWeights & weights,
     const std::string & weight_name,
     const std::string & bias_name,
     bool bias) {
@@ -126,7 +128,7 @@ engine::modules::LinearWeights linear_weights(
 TensorValue batch_norm2d(
     engine::core::ModuleBuildContext & ctx,
     const TensorValue & input,
-    const SeedVcWeightBundle & weights,
+    const SeedVcRmvpeWeights & weights,
     const std::string & prefix) {
     const int64_t channels = input.shape.dims[1];
     const auto weight = engine::core::reshape_tensor(
@@ -187,7 +189,7 @@ TensorValue relu(engine::core::ModuleBuildContext & ctx, const TensorValue & inp
 TensorValue conv_bn_relu(
     engine::core::ModuleBuildContext & ctx,
     const TensorValue & input,
-    const SeedVcWeightBundle & weights,
+    const SeedVcRmvpeWeights & weights,
     const std::string & conv_prefix,
     const std::string & bn_prefix,
     int64_t in_channels,
@@ -201,7 +203,7 @@ TensorValue conv_bn_relu(
 TensorValue conv_block_res(
     engine::core::ModuleBuildContext & ctx,
     const TensorValue & input,
-    const SeedVcWeightBundle & weights,
+    const SeedVcRmvpeWeights & weights,
     const std::string & prefix,
     int64_t in_channels,
     int64_t out_channels) {
@@ -226,7 +228,7 @@ TensorValue avg_pool2d_2x2(engine::core::ModuleBuildContext & ctx, const TensorV
 TensorValue conv_transpose2d_pytorch_2x(
     engine::core::ModuleBuildContext & ctx,
     const TensorValue & input,
-    const SeedVcWeightBundle & weights,
+    const SeedVcRmvpeWeights & weights,
     const std::string & prefix,
     int64_t out_channels) {
     const auto weight = require_tensor(weights, prefix + ".weight");
@@ -242,7 +244,7 @@ TensorValue conv_transpose2d_pytorch_2x(
 TensorValue decoder_upsample(
     engine::core::ModuleBuildContext & ctx,
     const TensorValue & input,
-    const SeedVcWeightBundle & weights,
+    const SeedVcRmvpeWeights & weights,
     const std::string & prefix,
     int64_t out_channels) {
     auto x = conv_transpose2d_pytorch_2x(ctx, input, weights, prefix + ".conv1.0", out_channels);
@@ -255,7 +257,7 @@ RmvpeGruOutputs build_gru_chunk_graph(
     const TensorValue & input,
     const TensorValue & keep,
     const TensorValue & initial_hidden,
-    const SeedVcWeightBundle & weights,
+    const SeedVcRmvpeWeights & weights,
     const std::string & suffix,
     bool reverse) {
     const int64_t frames = input.shape.dims[0];
@@ -301,7 +303,7 @@ RmvpeGruOutputs build_gru_chunk_graph(
 TensorValue build_rmvpe_feature_graph(
     engine::core::ModuleBuildContext & ctx,
     const TensorValue & mel,
-    const SeedVcWeightBundle & weights) {
+    const SeedVcRmvpeWeights & weights) {
     auto x = engine::modules::TransposeModule({{0, 2, 1}, 3}).build(ctx, mel);
     x = engine::core::reshape_tensor(ctx, contiguous(ctx, x), TensorShape::from_dims({1, 1, x.shape.dims[1], x.shape.dims[2]}));
     x = batch_norm2d(ctx, x, weights, "unet.encoder.bn");
@@ -355,7 +357,7 @@ TensorValue build_rmvpe_head_graph(
     engine::core::ModuleBuildContext & ctx,
     const TensorValue & forward,
     const TensorValue & reverse,
-    const SeedVcWeightBundle & weights) {
+    const SeedVcRmvpeWeights & weights) {
     auto gru = engine::modules::ConcatModule({1}).build(ctx, forward, reverse);
     auto logits = engine::modules::LinearModule({2 * kRmvpeHiddenDim, kRmvpeClasses, true})
                       .build(ctx, gru, linear_weights(weights, "fc.1", true));
@@ -699,7 +701,7 @@ struct SeedVcRmvpeF0Extractor::State {
         release_head_graph(head);
     }
 
-    void ensure_feature_graph(const SeedVcWeightBundle & weights, int64_t frames) {
+    void ensure_feature_graph(const SeedVcRmvpeWeights & weights, int64_t frames) {
         if (frames <= 0 || frames % 32 != 0) {
             throw std::runtime_error("Seed-VC RMVPE feature graph requires positive 32-aligned frame count");
         }
@@ -739,7 +741,7 @@ struct SeedVcRmvpeF0Extractor::State {
         feature.frames = frames;
     }
 
-    void ensure_gru_graph(const SeedVcWeightBundle & weights, GruGraph & target, const std::string & suffix, bool reverse_graph) {
+    void ensure_gru_graph(const SeedVcRmvpeWeights & weights, GruGraph & target, const std::string & suffix, bool reverse_graph) {
         if (target.ctx != nullptr) {
             return;
         }
@@ -794,7 +796,7 @@ struct SeedVcRmvpeF0Extractor::State {
         }
     }
 
-    void ensure_head_graph(const SeedVcWeightBundle & weights) {
+    void ensure_head_graph(const SeedVcRmvpeWeights & weights) {
         if (head.ctx != nullptr) {
             return;
         }
@@ -834,7 +836,7 @@ struct SeedVcRmvpeF0Extractor::State {
         }
     }
 
-    void ensure_graphs(const SeedVcWeightBundle & weights, int64_t feature_frames) {
+    void ensure_graphs(const SeedVcRmvpeWeights & weights, int64_t feature_frames) {
         ensure_feature_graph(weights, feature_frames);
         ensure_gru_graph(weights, forward, "", false);
         ensure_gru_graph(weights, reverse, "_reverse", true);
@@ -848,7 +850,7 @@ struct SeedVcRmvpeF0Extractor::State {
     HeadGraph head;
 };
 
-SeedVcRmvpeF0Extractor::SeedVcRmvpeF0Extractor(std::shared_ptr<const SeedVcWeightBundle> weights)
+SeedVcRmvpeF0Extractor::SeedVcRmvpeF0Extractor(std::shared_ptr<const SeedVcRmvpeWeights> weights)
     : weights_(std::move(weights)),
       state_(std::make_shared<State>()) {
     if (weights_ == nullptr) {

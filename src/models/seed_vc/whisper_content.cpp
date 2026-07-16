@@ -1,5 +1,7 @@
 #include "engine/models/seed_vc/whisper_content.h"
 
+#include "tensor_store_internal.h"
+
 #include "engine/framework/audio/dsp.h"
 #include "engine/framework/audio/waveform_ops.h"
 #include "engine/framework/core/backend.h"
@@ -21,7 +23,7 @@ namespace {
 
 using engine::core::TensorShape;
 
-const engine::core::TensorValue & require_tensor(const SeedVcWeightBundle & weights, const std::string & name) {
+const engine::core::TensorValue & require_tensor(const SeedVcWhisperEncoderWeights & weights, const std::string & name) {
     const auto it = weights.tensors.find(name);
     if (it == weights.tensors.end()) {
         throw std::runtime_error("Seed-VC Whisper missing tensor: " + name);
@@ -30,7 +32,7 @@ const engine::core::TensorValue & require_tensor(const SeedVcWeightBundle & weig
 }
 
 engine::modules::LinearWeights linear_weights(
-    const SeedVcWeightBundle & weights,
+    const SeedVcWhisperEncoderWeights & weights,
     const std::string & prefix,
     bool use_bias) {
     return engine::modules::LinearWeights{
@@ -38,13 +40,13 @@ engine::modules::LinearWeights linear_weights(
         use_bias ? std::optional<engine::core::TensorValue>(require_tensor(weights, prefix + ".bias")) : std::nullopt};
 }
 
-engine::modules::NormWeights norm_weights(const SeedVcWeightBundle & weights, const std::string & prefix) {
+engine::modules::NormWeights norm_weights(const SeedVcWhisperEncoderWeights & weights, const std::string & prefix) {
     return engine::modules::NormWeights{
         require_tensor(weights, prefix + ".weight"),
         require_tensor(weights, prefix + ".bias")};
 }
 
-engine::modules::WhisperEmbeddingConfig make_whisper_config(const SeedVcWeightBundle & weights) {
+engine::modules::WhisperEmbeddingConfig make_whisper_config(const SeedVcWhisperEncoderWeights & weights) {
     const auto positions = require_tensor(weights, "model.encoder.embed_positions.weight");
     const auto conv1 = require_tensor(weights, "model.encoder.conv1.weight");
     const auto q_proj = require_tensor(weights, "model.encoder.layers.0.self_attn.q_proj.weight");
@@ -65,7 +67,7 @@ engine::modules::WhisperEmbeddingConfig make_whisper_config(const SeedVcWeightBu
 }
 
 engine::modules::WhisperEmbeddingWeights make_whisper_weights(
-    const SeedVcWeightBundle & weights,
+    const SeedVcWhisperEncoderWeights & weights,
     const engine::modules::WhisperEmbeddingConfig & config) {
     engine::modules::WhisperEmbeddingWeights out;
     out.conv1 = {
@@ -150,7 +152,7 @@ std::vector<float> compute_whisper_log_mel(const std::vector<float> & waveform_1
 }  // namespace
 
 struct SeedVcWhisperContentEncoder::State {
-    explicit State(const SeedVcWeightBundle & bundle)
+    explicit State(const SeedVcWhisperEncoderWeights & bundle)
         : weights(make_whisper_weights(bundle, make_whisper_config(bundle))) {}
 
     ~State() {
@@ -164,7 +166,7 @@ struct SeedVcWhisperContentEncoder::State {
         }
     }
 
-    void ensure_graph(const SeedVcWeightBundle & bundle, const engine::modules::WhisperEmbeddingConfig & config) {
+    void ensure_graph(const SeedVcWhisperEncoderWeights & bundle, const engine::modules::WhisperEmbeddingConfig & config) {
         if (ctx != nullptr) {
             return;
         }
@@ -210,7 +212,7 @@ struct SeedVcWhisperContentEncoder::State {
     ggml_tensor * output_tensor = nullptr;
 };
 
-SeedVcWhisperContentEncoder::SeedVcWhisperContentEncoder(std::shared_ptr<const SeedVcWeightBundle> weights)
+SeedVcWhisperContentEncoder::SeedVcWhisperContentEncoder(std::shared_ptr<const SeedVcWhisperEncoderWeights> weights)
     : weights_(std::move(weights)) {
     if (weights_ == nullptr) {
         throw std::runtime_error("Seed-VC Whisper encoder requires weights");

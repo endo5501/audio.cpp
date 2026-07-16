@@ -1,17 +1,17 @@
 #pragma once
 
-#include "engine/models/seed_vc/weight_bundle.h"
-
 #include <cstdint>
 #include <memory>
 #include <vector>
 
 namespace engine::models::seed_vc {
 
+struct SeedVcRmvpeWeights;
+
 class SeedVcRmvpeF0Extractor {
 public:
     SeedVcRmvpeF0Extractor() = default;
-    explicit SeedVcRmvpeF0Extractor(std::shared_ptr<const SeedVcWeightBundle> weights);
+    explicit SeedVcRmvpeF0Extractor(std::shared_ptr<const SeedVcRmvpeWeights> weights);
     ~SeedVcRmvpeF0Extractor();
 
     SeedVcRmvpeF0Extractor(SeedVcRmvpeF0Extractor &&) noexcept;
@@ -27,7 +27,7 @@ public:
 private:
     struct State;
 
-    std::shared_ptr<const SeedVcWeightBundle> weights_;
+    std::shared_ptr<const SeedVcRmvpeWeights> weights_;
     std::shared_ptr<State> state_;
 };
 

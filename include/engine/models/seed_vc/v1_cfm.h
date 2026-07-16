@@ -1,13 +1,14 @@
 #pragma once
 
 #include "engine/models/seed_vc/assets.h"
-#include "engine/models/seed_vc/weight_bundle.h"
 
 #include <cstdint>
 #include <memory>
 #include <vector>
 
 namespace engine::models::seed_vc {
+
+struct SeedVcV1ModelWeights;
 
 struct SeedVcV1CfmEstimatorInput {
     std::vector<float> x;
@@ -43,7 +44,7 @@ class SeedVcV1CfmEstimator {
 public:
     SeedVcV1CfmEstimator() = default;
     SeedVcV1CfmEstimator(
-        std::shared_ptr<const SeedVcWeightBundle> weights,
+        std::shared_ptr<const SeedVcV1ModelWeights> weights,
         SeedVcV1DitConfig config,
         SeedVcV1WavenetConfig wavenet_config,
         int64_t style_dim);
@@ -60,7 +61,7 @@ public:
 private:
     struct State;
 
-    std::shared_ptr<const SeedVcWeightBundle> weights_;
+    std::shared_ptr<const SeedVcV1ModelWeights> weights_;
     SeedVcV1DitConfig config_;
     SeedVcV1WavenetConfig wavenet_config_;
     int64_t style_dim_ = 0;
