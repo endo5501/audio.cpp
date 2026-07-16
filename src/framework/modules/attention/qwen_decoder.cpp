@@ -234,6 +234,7 @@ QwenDecoderLayerConfig qwen_decoder_layer_config_from_stack(const QwenDecoderSta
     out.intermediate_size = config.intermediate_size;
     out.rms_norm_eps = config.rms_norm_eps;
     out.rope_theta = config.rope_theta;
+    out.rope_type = config.rope_type;
     out.attention_precision = config.attention_precision;
     out.projection_precision = config.projection_precision;
     out.use_qk_norm = config.use_qk_norm;
@@ -346,8 +347,11 @@ QwenDecoderLayerOutputs QwenDecoderLayerModule::build(
     }
     v = reshape_qwen_heads(ctx, v, config_.num_key_value_heads, dim);
 
-    q = RoPEModule({dim, GGML_ROPE_TYPE_NEOX, config_.rope_theta}).build(ctx, q, positions);
-    k = RoPEModule({dim, GGML_ROPE_TYPE_NEOX, config_.rope_theta}).build(ctx, k, positions);
+    const core::TensorValue * rope_factors = weights.rope_frequency_factors.has_value()
+        ? &*weights.rope_frequency_factors
+        : nullptr;
+    q = RoPEModule({dim, config_.rope_type, config_.rope_theta}).build(ctx, q, positions, rope_factors);
+    k = RoPEModule({dim, config_.rope_type, config_.rope_theta}).build(ctx, k, positions, rope_factors);
     k = core::ensure_backend_addressable_layout(ctx, k);
     v = core::ensure_backend_addressable_layout(ctx, v);
 
@@ -478,8 +482,11 @@ QwenDecoderLayerOutputs QwenDecoderLayerModule::build_with_static_cache_tail(
     }
     v = reshape_qwen_heads(ctx, v, config_.num_key_value_heads, dim);
 
-    q = RoPEModule({dim, GGML_ROPE_TYPE_NEOX, config_.rope_theta}).build(ctx, q, positions);
-    k = RoPEModule({dim, GGML_ROPE_TYPE_NEOX, config_.rope_theta}).build(ctx, k, positions);
+    const core::TensorValue * rope_factors = weights.rope_frequency_factors.has_value()
+        ? &*weights.rope_frequency_factors
+        : nullptr;
+    q = RoPEModule({dim, config_.rope_type, config_.rope_theta}).build(ctx, q, positions, rope_factors);
+    k = RoPEModule({dim, config_.rope_type, config_.rope_theta}).build(ctx, k, positions, rope_factors);
     k = core::ensure_backend_addressable_layout(ctx, k);
     v = core::ensure_backend_addressable_layout(ctx, v);
 

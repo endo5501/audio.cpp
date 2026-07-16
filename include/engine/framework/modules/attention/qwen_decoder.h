@@ -48,6 +48,7 @@ struct QwenDecoderLayerConfig {
     int64_t intermediate_size = 0;
     float rms_norm_eps = 1e-5f;
     float rope_theta = 10000.0f;
+    int rope_type = GGML_ROPE_TYPE_NEOX;
     ggml_prec attention_precision = GGML_PREC_F32;
     ggml_prec projection_precision = GGML_PREC_DEFAULT;
     bool use_qk_norm = true;
@@ -67,6 +68,9 @@ struct QwenDecoderLayerWeights {
     NormWeights k_norm;
     NormWeights post_norm;
     QwenMLPWeights mlp;
+    // Optional per-frequency RoPE divisors (head_dim / 2), used by Llama-3
+    // scaling and compatible checkpoints.
+    std::optional<core::TensorValue> rope_frequency_factors;
 };
 
 struct QwenDecoderLayerOutputs {
@@ -117,6 +121,7 @@ struct QwenDecoderStackConfig {
     int64_t layers = 0;
     float rms_norm_eps = 1e-5f;
     float rope_theta = 10000.0f;
+    int rope_type = GGML_ROPE_TYPE_NEOX;
     ggml_prec attention_precision = GGML_PREC_F32;
     ggml_prec projection_precision = GGML_PREC_DEFAULT;
     bool use_qk_norm = true;
