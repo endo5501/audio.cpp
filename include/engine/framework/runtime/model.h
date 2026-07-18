@@ -112,9 +112,7 @@ struct LoaderAdvertisement {
     std::vector<std::string> api_endpoints;
 };
 
-/** Path-free defaults used by ``--list-loaders --json`` when a loader does not override. */
-CapabilitySet default_advertised_capabilities_for_family(const std::string & family);
-std::string default_instructions_policy_for_family(const std::string & family);
+/** Map advertised capabilities to the HTTP surfaces they normally use. */
 std::vector<std::string> default_api_endpoints_for_capabilities(const CapabilitySet & capabilities);
 
 class IVoiceModelLoader {
@@ -126,7 +124,10 @@ public:
     virtual ModelInspection inspect(const ModelLoadRequest & request) const = 0;
     virtual std::unique_ptr<ILoadedVoiceModel> load(const ModelLoadRequest & request) const = 0;
 
-    /** Catalog-time capabilities (no model path). Override when defaults are wrong. */
+    /**
+     * Path-free loader catalog for ``--list-loaders --json``.
+     * Override ``advertised_capabilities`` (and policy when non-default) on each loader.
+     */
     virtual CapabilitySet advertised_capabilities() const;
     virtual std::string advertised_instructions_policy() const;
     virtual std::vector<std::string> advertised_api_endpoints() const;

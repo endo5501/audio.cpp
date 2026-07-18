@@ -7,6 +7,7 @@ import fractions
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -142,7 +143,8 @@ class ModelPackage:
     required_files: tuple[str, ...]
     source: SnapshotSource | CompositeSnapshotSource | ConverterSource | UnsupportedSource
     description: str = ""
-    # Optional discovery overrides for ``list --json`` / tooling consumers.
+    # Optional identity fields for ``list --json`` consumers. When unset,
+    # family/tasks/standalone/gated are derived from local package metadata only.
     family: str | None = None
     standalone: bool | None = None
     parent_package_id: str | None = None
@@ -152,15 +154,10 @@ class ModelPackage:
 
 UTILITY_CONVERTER_KINDS = {"pytorch_to_safetensors"}
 POSTPROCESS_SNAPSHOT_PACKAGE_IDS = {"voxcpm2"}
+# HF repos that require accepting a license / access grant before download.
 _GATED_REPO_MARKERS = (
     "kyutai/pocket-tts",
     "stabilityai/",
-)
-_GATED_TEXT_MARKERS = (
-    "gated",
-    "requires access",
-    "accept the license",
-    "accept the conditions",
 )
 
 
@@ -225,6 +222,8 @@ CATALOG: tuple[ModelPackage, ...] = (
         target_directory="Kokoro-82M-bf16",
         source=SnapshotSource(repo_id="mlx-community/Kokoro-82M-bf16"),
         required_files=("config.json", "kokoro-v1_0.safetensors", "voices/af_heart.safetensors"),
+        family="kokoro_tts",
+        tasks=("tts",),
     ),
     ModelPackage(
         id="moss_tts_nano_100m",
@@ -796,6 +795,8 @@ CATALOG: tuple[ModelPackage, ...] = (
             "tokenizer.json",
             "tokenizer_config.json",
         ),
+        family="higgs_audio_tts",
+        tasks=("tts",),
     ),
     ModelPackage(
         id="heartmula",
@@ -1237,85 +1238,78 @@ def resolve_path(path: str) -> Path:
     return REPO_ROOT / candidate
 
 
-def _infer_family_from_package_id(package_id: str) -> str:
+_FAMILY_ID_STRIP_PATTERNS = (
+    re.compile(r"_\d+_\d+b(?:_base|_custom_voice|_voice_design)?$"),
+    re.compile(r"_\d+b(?:_base|_custom_voice|_voice_design)?$"),
+    re.compile(r"_\d+m(?:_bf16)?$"),
+    re.compile(r"_bf16$"),
+    re.compile(r"_\d+spk_v\d+$"),
+    re.compile(r"_\d+hz_\d+k_v\d+$"),
+    re.compile(r"_3_small_(?:music|sfx)$"),
+    re.compile(r"_3_medium$"),
+    re.compile(r"_v\d+(?:_\d+)?$"),
+    re.compile(r"_\d+$"),
+    re.compile(r"_model$"),
+    re.compile(r"_hf$"),
+    re.compile(r"_12hz$"),
+    re.compile(r"_(?:base|custom_voice|voice_design)$"),
+)
+
+
+def _default_family_from_package_id(package_id: str) -> str:
+    """Strip size/version suffixes from a package id. Prefer ``ModelPackage.family`` for exceptions."""
     key = str(package_id or "").strip().lower()
-    aliases = (
-        ("qwen3_forced_aligner", "qwen3_forced_aligner"),
-        ("qwen3_tts", "qwen3_tts"),
-        ("qwen3_asr", "qwen3_asr"),
-        ("vibevoice_asr", "vibevoice_asr"),
-        ("vibevoice", "vibevoice"),
-        ("moss_tts_nano", "moss_tts_nano"),
-        ("moss_tts_local", "moss_tts_local"),
-        ("higgs_audio", "higgs_audio_stt"),
-        ("irodori_tts", "irodori_tts"),
-        ("index_tts", "index_tts2"),
-        ("sortformer", "sortformer_diar"),
-        ("marblenet", "marblenet_vad"),
-        ("stable_audio", "stable_audio"),
-        ("mel_band_roformer", "mel_band_roformer"),
-        ("htdemucs", "htdemucs"),
-        ("miocodec", "miocodec"),
-        ("miotts", "miotts"),
-        ("omnivoice", "omnivoice"),
-        ("pocket_tts", "pocket_tts"),
-        ("supertonic", "supertonic"),
-        ("voxcpm2", "voxcpm2"),
-        ("chatterbox", "chatterbox"),
-        ("citrinet", "citrinet_asr"),
-        ("hviske", "hviske_asr"),
-        ("nemotron", "nemotron_asr"),
-        ("seed_vc", "seed_vc"),
-        ("vevo2", "vevo2"),
-        ("ace_step", "ace_step"),
-        ("heartmula", "heartmula"),
-        ("silero", "silero_vad"),
-        ("kokoro", "kokoro_tts"),
-        ("parakeet", "parakeet_tdt"),
-    )
-    for prefix, family in aliases:
-        if key == prefix or key.startswith(prefix + "_"):
-            return family
+    if not key:
+        return ""
+    changed = True
+    while changed and key:
+        changed = False
+        for pattern in _FAMILY_ID_STRIP_PATTERNS:
+            updated = pattern.sub("", key)
+            if updated and updated != key:
+                key = updated
+                changed = True
+                break
     return key
 
 
-def _infer_tasks_from_family(family: str) -> list[str]:
+def _default_tasks_from_family(family: str) -> list[str]:
     key = str(family or "").strip().lower()
+    if not key:
+        return []
     if "forced_aligner" in key or key.endswith("_aligner") or key.endswith("_align"):
         return ["align"]
     if key.endswith("_asr") or key.endswith("_stt") or key in {"parakeet_tdt", "whisper"}:
         return ["asr"]
     if "vad" in key:
         return ["vad"]
-    if "diar" in key or "sortformer" in key:
+    if "diar" in key:
         return ["diar"]
     if any(token in key for token in ("demucs", "roformer", "separator")):
         return ["sep"]
     if key in {"stable_audio", "ace_step", "heartmula"} or key.endswith("_gen"):
         return ["gen"]
-    if key in {"seed_vc", "vevo2"} or key.endswith("_vc"):
+    if key.endswith("_vc") or key in {"seed_vc", "vevo2"}:
         return ["vc"]
-    if key == "miocodec" or key.startswith("miocodec") or key.endswith("_codec"):
+    if key.endswith("_codec") or key == "miocodec":
         return ["codec"]
-    if any(
-        token in key
-        for token in (
-            "tts",
-            "kokoro",
-            "chatterbox",
-            "voxcpm",
-            "omnivoice",
-            "supertonic",
-            "miotts",
-            "pocket",
-            "irodori",
-            "moss_tts",
-            "index_tts",
-            "vibevoice",
-        )
-    ):
-        if key.endswith("_asr") or key.endswith("_stt"):
-            return ["asr"]
+    if key.endswith("_asr") or key.endswith("_stt"):
+        return ["asr"]
+    if "tts" in key or key in {
+        "kokoro",
+        "kokoro_tts",
+        "chatterbox",
+        "voxcpm2",
+        "omnivoice",
+        "supertonic",
+        "miotts",
+        "pocket_tts",
+        "irodori_tts",
+        "index_tts2",
+        "vibevoice",
+        "moss_tts_nano",
+        "moss_tts_local",
+    }:
         return ["tts"]
     return []
 
@@ -1335,10 +1329,7 @@ def _package_is_gated(package: ModelPackage) -> bool:
     if isinstance(package.gated, bool):
         return package.gated
     repos = [repo.lower() for repo in _collect_package_repo_ids(package)]
-    if any(any(marker in repo for marker in _GATED_REPO_MARKERS) for repo in repos):
-        return True
-    text = str(package.description or "").lower()
-    return any(marker in text for marker in _GATED_TEXT_MARKERS)
+    return any(any(marker in repo for marker in _GATED_REPO_MARKERS) for repo in repos)
 
 
 def _package_standalone_fields(package: ModelPackage) -> tuple[bool, str | None]:
@@ -1349,7 +1340,6 @@ def _package_standalone_fields(package: ModelPackage) -> tuple[bool, str | None]
     if desc.startswith("subcomponent only.") or desc.startswith("utility only.") or kind == "utility":
         parent = package.parent_package_id
         if not parent:
-            # "Use moss_tts_nano_100m for the full framework..."
             for token in desc.replace(".", " ").replace(",", " ").split():
                 if token in PACKAGE_BY_ID and token != package.id:
                     parent = token
@@ -1410,8 +1400,8 @@ def package_payload(package: ModelPackage) -> dict[str, object]:
             "reason": source.reason,
         }
         installable = False
-    family = package.family or _infer_family_from_package_id(package.id)
-    tasks = list(package.tasks) if package.tasks else _infer_tasks_from_family(family)
+    family = package.family or _default_family_from_package_id(package.id)
+    tasks = list(package.tasks) if package.tasks else _default_tasks_from_family(family)
     standalone, parent_package_id = _package_standalone_fields(package)
     return {
         "id": package.id,
