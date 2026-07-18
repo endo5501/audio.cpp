@@ -288,3 +288,4 @@ Status labels:
 | `vibevoice` | No | --- | --- | --- | --- |
 | `vibevoice_asr` | Done | Pass | --- | Pass | Pass |
 | `voxcpm2` | Done | Pass | Pass | No (clone similarity drift, frame drift) | No (similarity drift, frame drift) |
+| `voxtral_realtime` | Done | Pass | --- | Pass | Pass |

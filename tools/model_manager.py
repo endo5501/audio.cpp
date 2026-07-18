@@ -388,6 +388,33 @@ CATALOG: tuple[ModelPackage, ...] = (
         description="Native Hugging Face Transformers checkpoint; no conversion is required.",
     ),
     ModelPackage(
+        id="voxtral_realtime",
+        display_name="Voxtral Mini 4B Realtime",
+        target_directory="Voxtral-Mini-4B-Realtime-2602",
+        source=SnapshotSource(
+            repo_id="mistralai/Voxtral-Mini-4B-Realtime-2602",
+            include_prefixes=(
+                "config.json",
+                "generation_config.json",
+                "model.safetensors",
+                "params.json",
+                "processor_config.json",
+                "tekken.json",
+            ),
+        ),
+        required_files=(
+            "config.json",
+            "generation_config.json",
+            "model.safetensors",
+            "params.json",
+            "processor_config.json",
+            "tekken.json",
+        ),
+        family="voxtral_realtime",
+        tasks=("asr",),
+        description="Native Hugging Face checkpoint for Voxtral realtime ASR; no conversion is required.",
+    ),
+    ModelPackage(
         id="higgs_audio_stt",
         display_name="Higgs Audio STT",
         target_directory="higgs-audio-v3-stt",
@@ -1279,7 +1306,7 @@ def _default_tasks_from_family(family: str) -> list[str]:
         return []
     if "forced_aligner" in key or key.endswith("_aligner") or key.endswith("_align"):
         return ["align"]
-    if key.endswith("_asr") or key.endswith("_stt") or key in {"parakeet_tdt", "whisper"}:
+    if key.endswith("_asr") or key.endswith("_stt") or key in {"parakeet_tdt", "whisper", "voxtral_realtime"}:
         return ["asr"]
     if "vad" in key:
         return ["vad"]

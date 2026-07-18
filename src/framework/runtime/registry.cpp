@@ -37,6 +37,7 @@
 #include "engine/models/vevo2/loader.h"
 #include "engine/models/vibevoice/loader.h"
 #include "engine/models/vibevoice_asr/loader.h"
+#include "engine/models/voxtral_realtime/loader.h"
 #include "engine/models/voxcpm2/loader.h"
 
 #include <algorithm>
@@ -254,6 +255,7 @@ ModelRegistry make_default_registry(const std::optional<std::filesystem::path> &
         engine::models::voxcpm2::make_voxcpm2_loader(),
         engine::models::vibevoice::make_vibevoice_loader(),
         engine::models::vibevoice_asr::make_vibevoice_asr_loader(),
+        engine::models::voxtral_realtime::make_voxtral_realtime_loader(),
         engine::models::heartmula::make_heartmula_loader(),
         engine::models::higgs_audio_stt::make_higgs_audio_stt_loader(),
         engine::models::hviske_asr::make_hviske_asr_loader(),

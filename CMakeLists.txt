@@ -334,6 +334,13 @@ add_library(engine_runtime STATIC
     src/models/vibevoice_asr/speech_tokenizer.cpp
     src/models/vibevoice_asr/text_decoder.cpp
     src/models/vibevoice_asr/tokenizer_text.cpp
+    src/models/voxtral_realtime/assets.cpp
+    src/models/voxtral_realtime/tokenizer_text.cpp
+    src/models/voxtral_realtime/frontend.cpp
+    src/models/voxtral_realtime/audio_encoder.cpp
+    src/models/voxtral_realtime/text_decoder.cpp
+    src/models/voxtral_realtime/session.cpp
+    src/models/voxtral_realtime/loader.cpp
     src/models/heartmula/assets.cpp
     src/models/heartmula/codec.cpp
     src/models/heartmula/generator.cpp
@@ -719,6 +726,7 @@ if (ENGINE_BUILD_WARMBENCH)
     add_engine_warmbench(supertonic_warm_bench tests/supertonic/supertonic_warm_bench.cpp)
     add_engine_warmbench(vevo2_warm_bench tests/vevo2/vevo2_warm_bench.cpp)
     add_engine_warmbench(vibevoice_asr_warm_bench tests/vibevoice_asr/vibevoice_asr_warm_bench.cpp)
+    add_engine_warmbench(voxtral_realtime_warm_bench tests/voxtral_realtime/voxtral_realtime_warm_bench.cpp)
     add_engine_warmbench(voxcpm2_warm_bench tests/voxcpm2/voxcpm2_warm_bench.cpp)
 endif()
 
