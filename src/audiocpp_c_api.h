@@ -41,6 +41,17 @@ AUDIOCPP_API void audiocpp_reset_abort(audiocpp_abort_handle *handle);
 // NOT freed by audiocpp_free. Returns null on failure.
 AUDIOCPP_API audiocpp_ctx *audiocpp_init(const char *model_dir, int n_threads,
                                          audiocpp_abort_handle *abort_handle);
+
+// Returns a message describing why the most recent audiocpp_init() call on THIS
+// thread returned null (the exception text, a missing model spec, a model/session
+// load failure, etc.), or an empty string when the last init on this thread
+// succeeded. Because audiocpp_init deletes the failed context before returning
+// null, its cause cannot be recovered via audiocpp_get_error(ctx); this function
+// exposes it instead. The message is stored in a thread-local buffer that stays
+// valid until the next audiocpp_init() on the same thread (NovelViewer performs
+// all init calls on a single worker isolate thread). Never returns null.
+AUDIOCPP_API const char *audiocpp_get_init_error(void);
+
 AUDIOCPP_API int audiocpp_is_loaded(const audiocpp_ctx *ctx);
 AUDIOCPP_API void audiocpp_free(audiocpp_ctx *ctx);
 

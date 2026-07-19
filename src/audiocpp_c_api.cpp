@@ -225,6 +225,13 @@ create_session_with_fallback(const engine::runtime::ILoadedVoiceModel &model,
   return model.create_task_session(task_spec, options);
 }
 
+// Thread-local buffer holding the reason the most recent audiocpp_init() on
+// this thread returned null. audiocpp_init deletes the failed context before
+// returning, so its cause is unavailable via audiocpp_get_error(ctx); this
+// buffer preserves it for audiocpp_get_init_error(). It is set on every init
+// failure path and cleared on success.
+thread_local std::string g_init_error;
+
 }  // namespace
 
 audiocpp_abort_handle *audiocpp_create_abort_handle(void) {
@@ -250,10 +257,12 @@ void audiocpp_reset_abort(audiocpp_abort_handle *handle) {
 audiocpp_ctx *audiocpp_init(const char *model_dir, int n_threads,
                             audiocpp_abort_handle *abort_handle) {
   if (model_dir == nullptr) {
+    g_init_error = "model_dir is null";
     return nullptr;
   }
   auto *ctx = new (std::nothrow) audiocpp_ctx();
   if (ctx == nullptr) {
+    g_init_error = "failed to allocate Irodori-TTS context (out of memory)";
     return nullptr;
   }
   try {
@@ -269,11 +278,16 @@ audiocpp_ctx *audiocpp_init(const char *model_dir, int n_threads,
     engine::runtime::ModelLoadRequest load_request;
     load_request.model_path = model_path;
     load_request.family_hint = "irodori_tts";
-    if (const auto spec = resolve_model_spec(model_path)) {
+    const auto spec = resolve_model_spec(model_path);
+    if (spec) {
       load_request.model_spec_override = *spec;
     }
     ctx->model = ctx->registry.load(load_request);
     if (ctx->model == nullptr) {
+      g_init_error =
+          spec ? "failed to load Irodori-TTS model from " + model_path.string()
+               : "Irodori-TTS model spec (irodori_tts.json) not found next to "
+                 "the library or in " + model_path.string();
       delete ctx;
       return nullptr;
     }
@@ -282,6 +296,7 @@ audiocpp_ctx *audiocpp_init(const char *model_dir, int n_threads,
     ctx->offline = dynamic_cast<engine::runtime::IOfflineVoiceTaskSession *>(
         ctx->session.get());
     if (ctx->offline == nullptr) {
+      g_init_error = "Irodori-TTS session is not an offline voice task session";
       delete ctx;
       return nullptr;
     }
@@ -293,16 +308,21 @@ audiocpp_ctx *audiocpp_init(const char *model_dir, int n_threads,
     }
     ctx->session->prepare(engine::runtime::SessionPreparationRequest{});
     ctx->loaded = true;
+    g_init_error.clear();
     return ctx;
-  } catch (const std::exception &) {
+  } catch (const std::exception &ex) {
     // Invalid model path / load failure: return null without crashing.
+    g_init_error = ex.what();
     delete ctx;
     return nullptr;
   } catch (...) {
+    g_init_error = "unknown error during Irodori-TTS init";
     delete ctx;
     return nullptr;
   }
 }
+
+const char *audiocpp_get_init_error(void) { return g_init_error.c_str(); }
 
 int audiocpp_is_loaded(const audiocpp_ctx *ctx) {
   if (ctx == nullptr) {
