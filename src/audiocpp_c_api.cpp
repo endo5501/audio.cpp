@@ -32,6 +32,13 @@
 // Abort flag holder whose lifetime is independent of any synthesis context.
 // Created once per TTS session and outlives context init/free, so an abort
 // issued after the context is freed never writes to freed memory (F111 lesson).
+//
+// ABI CONTRACT: this struct MUST remain a single std::atomic<bool> and stay
+// byte-compatible with qwen3_tts_abort_handle in the qwen3-tts.cpp fork.
+// NovelViewer shares one session abort handle across both engine DLLs (a
+// handle allocated by either library may be wired into the other's init), so
+// any layout change here silently breaks cross-engine abort. Change both
+// forks in lockstep or not at all.
 struct audiocpp_abort_handle {
   std::atomic<bool> abort_flag{false};
 };
