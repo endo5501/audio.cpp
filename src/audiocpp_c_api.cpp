@@ -14,6 +14,7 @@
 #include <new>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #ifdef _WIN32
@@ -42,6 +43,18 @@
 struct audiocpp_abort_handle {
   std::atomic<bool> abort_flag{false};
 };
+
+// Enforce the cross-fork ABI contract at compile time: the handle must stay
+// byte-compatible with qwen3_tts_abort_handle in the qwen3-tts.cpp fork (a
+// single std::atomic<bool>) so one session handle can be shared across both
+// engine DLLs. If either fork's layout drifts, this fails to build instead of
+// silently breaking cross-engine abort at runtime.
+static_assert(sizeof(audiocpp_abort_handle) == sizeof(std::atomic<bool>),
+              "audiocpp_abort_handle must stay byte-compatible with "
+              "qwen3_tts_abort_handle (single std::atomic<bool>)");
+static_assert(std::is_standard_layout_v<audiocpp_abort_handle>,
+              "audiocpp_abort_handle must be standard-layout to keep a stable "
+              "ABI shared across the audio.cpp and qwen3-tts.cpp forks");
 
 struct audiocpp_ctx {
   engine::runtime::ModelRegistry registry;
