@@ -6,6 +6,7 @@
 #include "engine/models/irodori_tts/tokenizer_text.h"
 #include "engine/models/irodori_tts/types.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -31,8 +32,22 @@ public:
   void prepare(const runtime::SessionPreparationRequest &request) override;
   runtime::TaskResult run(const runtime::TaskRequest &request) override;
 
+  // NovelViewer abort patch: observe an externally-owned atomic abort flag.
+  // The pointed-to flag must outlive the session (the FFI shim keeps it in an
+  // abort handle whose lifetime is independent of this session). A null flag
+  // disables abort checking.
+  void set_abort_flag(const std::atomic<bool> *flag) noexcept {
+    abort_flag_ = flag;
+  }
+
 private:
   IrodoriRequest make_request(const runtime::TaskRequest &request) const;
+
+  // NovelViewer abort patch: returns true when synthesis should stop.
+  bool aborted() const noexcept {
+    return abort_flag_ != nullptr &&
+           abort_flag_->load(std::memory_order_acquire);
+  }
 
   struct ReferenceAudioCacheKey {
     uint64_t hash = 0;
@@ -73,6 +88,8 @@ private:
   runtime::CacheSlots<ReferenceAudioCacheKey, ReferenceSpeakerCacheEntry,
                       ReferenceAudioCacheKeyEqual>
       reference_speaker_cache_;
+  // NovelViewer abort patch: non-owning pointer to an external abort flag.
+  const std::atomic<bool> *abort_flag_ = nullptr;
 };
 
 } // namespace engine::models::irodori_tts

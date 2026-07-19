@@ -468,6 +468,10 @@ IrodoriTTSSession::run(const runtime::TaskRequest &request) {
   const int hop_length = static_cast<int>(assets_->codec.hop_length);
   for (size_t chunk_index = 0; chunk_index < chunk_requests.size();
        ++chunk_index) {
+    // NovelViewer abort patch: stop before starting an expensive chunk.
+    if (aborted()) {
+      throw std::runtime_error("Irodori-TTS synthesis aborted");
+    }
     const auto &chunk_request = chunk_requests[chunk_index];
     const IrodoriRequest irodori_request = make_request(chunk_request);
     debug::trace_log_scalar(
@@ -578,6 +582,10 @@ IrodoriTTSSession::run(const runtime::TaskRequest &request) {
     std::vector<float> velocity(x_t.size());
     for (int64_t step = 0;
          step < irodori_request.generation.num_inference_steps; ++step) {
+      // NovelViewer abort patch: check at the top of every RF sampling step.
+      if (aborted()) {
+        throw std::runtime_error("Irodori-TTS synthesis aborted");
+      }
       const float u_next =
           static_cast<float>(step + 1) /
           static_cast<float>(irodori_request.generation.num_inference_steps);
