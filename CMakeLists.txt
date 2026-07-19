@@ -83,6 +83,8 @@ option(ENGINE_ENABLE_OPENMP "Build host code with OpenMP support" ON)
 option(ENGINE_BUILD_EXAMPLES "Build example binaries" OFF)
 option(ENGINE_BUILD_TESTS "Build framework unit tests" OFF)
 option(ENGINE_BUILD_WARMBENCH "Build warmbench helper binaries" OFF)
+# NovelViewer: build the C ABI FFI shared library (audiocpp_ffi) for Dart FFI.
+option(AUDIOCPP_BUILD_SHARED "Build the audiocpp_ffi C ABI shared library" OFF)
 set(AUDIOCPP_GGML_SOURCE_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/external/ggml"
     CACHE PATH "ggml source tree to build with AudioCPP")
@@ -590,6 +592,28 @@ add_executable(audiocpp_cli
 target_link_libraries(audiocpp_cli PRIVATE engine_runtime ggml)
 if (ENGINE_ENABLE_OPENMP)
     target_link_libraries(audiocpp_cli PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+# NovelViewer: C ABI shared library for Dart FFI. Links engine_runtime and ggml
+# statically so the resulting audiocpp_ffi.dll / libaudiocpp_ffi.dylib is
+# self-contained. Symbols are exported via the AUDIOCPP_API dllexport/visibility
+# macro in src/audiocpp_c_api.h.
+if (AUDIOCPP_BUILD_SHARED)
+    add_library(audiocpp_ffi SHARED
+        src/audiocpp_c_api.cpp
+    )
+    set_target_properties(audiocpp_ffi PROPERTIES
+        OUTPUT_NAME audiocpp_ffi
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+    )
+    target_include_directories(audiocpp_ffi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(audiocpp_ffi PRIVATE engine_runtime ggml)
+    if (ENGINE_ENABLE_OPENMP)
+        target_link_libraries(audiocpp_ffi PRIVATE OpenMP::OpenMP_CXX)
+    endif()
 endif()
 
 add_executable(audiocpp_server
