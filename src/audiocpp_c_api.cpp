@@ -53,6 +53,18 @@ struct audiocpp_ctx {
   int sample_rate = 0;
   std::string last_error;
   bool loaded = false;
+
+  // Single-entry cache for the decoded reference WAV. audiocpp_synthesize is
+  // called repeatedly with the same ref_wav_path during a clone session, so we
+  // avoid re-reading and re-decoding the file every call. The cache is keyed on
+  // the resolved path plus the file's size and last-write time; a change to any
+  // of them invalidates the entry. If the file cannot be stat'd we fall back to
+  // an uncached read and leave the cache invalid.
+  std::string ref_cache_path;
+  std::uintmax_t ref_cache_size = 0;
+  std::filesystem::file_time_type ref_cache_mtime{};
+  engine::runtime::AudioBuffer ref_cache_buffer;
+  bool ref_cache_valid = false;
 };
 
 namespace {
@@ -138,6 +150,38 @@ resolve_model_spec(const std::filesystem::path &model_dir) {
 engine::runtime::AudioBuffer read_audio_buffer(const std::filesystem::path &path) {
   const auto wav = engine::audio::read_wav_f32(path);
   return engine::runtime::AudioBuffer{wav.sample_rate, wav.channels, wav.samples};
+}
+
+// Returns the decoded reference audio for `path`, reusing ctx's single-entry
+// cache when the file's identity (key path + size + last-write time) is
+// unchanged. On any stat failure the cache is bypassed and invalidated and the
+// file is read directly. The returned reference is owned by ctx and remains
+// valid until the next call; callers copy it into the request.
+const engine::runtime::AudioBuffer &
+get_ref_audio_buffer(audiocpp_ctx &ctx, const std::string &key,
+                     const std::filesystem::path &path) {
+  std::error_code size_ec;
+  const std::uintmax_t size = std::filesystem::file_size(path, size_ec);
+  std::error_code mtime_ec;
+  const std::filesystem::file_time_type mtime =
+      std::filesystem::last_write_time(path, mtime_ec);
+  if (!size_ec && !mtime_ec) {
+    if (ctx.ref_cache_valid && ctx.ref_cache_path == key &&
+        ctx.ref_cache_size == size && ctx.ref_cache_mtime == mtime) {
+      return ctx.ref_cache_buffer;
+    }
+    ctx.ref_cache_buffer = read_audio_buffer(path);
+    ctx.ref_cache_path = key;
+    ctx.ref_cache_size = size;
+    ctx.ref_cache_mtime = mtime;
+    ctx.ref_cache_valid = true;
+    return ctx.ref_cache_buffer;
+  }
+  // Cannot stat the file: bypass the cache, invalidate any stale entry, and
+  // read directly (reusing the member as scratch storage).
+  ctx.ref_cache_valid = false;
+  ctx.ref_cache_buffer = read_audio_buffer(path);
+  return ctx.ref_cache_buffer;
 }
 
 // Create the offline task session, preferring the platform GPU backend
@@ -294,10 +338,11 @@ int audiocpp_synthesize(audiocpp_ctx *ctx, const char *text,
           std::to_string(num_inference_steps);
     }
     if (ref_wav_path != nullptr && ref_wav_path[0] != '\0') {
+      const std::string ref_key(ref_wav_path);
       request.voice = engine::runtime::VoiceCondition{};
       request.voice->speaker = engine::runtime::VoiceReference{};
       request.voice->speaker->audio =
-          read_audio_buffer(path_from_utf8(ref_wav_path));
+          get_ref_audio_buffer(*ctx, ref_key, path_from_utf8(ref_wav_path));
     }
 
     engine::runtime::TaskResult result = ctx->offline->run(request);
