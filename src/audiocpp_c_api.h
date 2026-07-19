@@ -50,10 +50,18 @@ AUDIOCPP_API void audiocpp_free(audiocpp_ctx *ctx);
 //   ref=path,   caption=NULL   -> voice clone
 //   ref=NULL,   caption=text   -> caption / voice design
 //   ref=path,   caption=text   -> clone + caption combined
-// An empty caption string is treated as no caption. `speaker_guidance_scale`,
-// `caption_guidance_scale`, and `num_inference_steps` fall back to engine
-// defaults (5.0 / 3.0 / 40) when <= 0. Returns 0 on success, non-zero on error
-// (including abort); on error audiocpp_get_error(ctx) returns the message.
+// An empty caption string is treated as no caption.
+//
+// Guidance-scale / step contract:
+//   `speaker_guidance_scale` and `caption_guidance_scale`: any value >= 0.0 is
+//   forwarded to the engine verbatim. A scale of exactly 0.0 is meaningful and
+//   disables classifier-free guidance for that stream; it is NOT the same as
+//   "use default". Only a NEGATIVE value falls back to the engine default
+//   (5.0 speaker / 3.0 caption).
+//   `num_inference_steps`: a value > 0 is forwarded; a value <= 0 falls back to
+//   the engine default (40).
+// Returns 0 on success, non-zero on error (including abort); on error
+// audiocpp_get_error(ctx) returns the message.
 AUDIOCPP_API int audiocpp_synthesize(audiocpp_ctx *ctx, const char *text,
                                      const char *ref_wav_path,
                                      const char *caption,

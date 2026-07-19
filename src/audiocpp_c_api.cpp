@@ -278,11 +278,14 @@ int audiocpp_synthesize(audiocpp_ctx *ctx, const char *text,
     if (caption != nullptr && caption[0] != '\0') {
       request.options["caption"] = std::string(caption);
     }
-    if (speaker_guidance_scale > 0.0F) {
+    // A scale of exactly 0.0 is semantically meaningful (it disables CFG for
+    // that stream in the engine), so any non-negative value is forwarded.
+    // Only a negative value means "use the engine default".
+    if (speaker_guidance_scale >= 0.0F) {
       request.options["speaker_guidance_scale"] =
           std::to_string(speaker_guidance_scale);
     }
-    if (caption_guidance_scale > 0.0F) {
+    if (caption_guidance_scale >= 0.0F) {
       request.options["caption_guidance_scale"] =
           std::to_string(caption_guidance_scale);
     }
