@@ -118,6 +118,16 @@ int main() {
             require_contains(message, "invalid WAV RIFF header", "mislabeled MP3");
         }
 
+        // Content wins over the file name for WAV: the sniff runs before the
+        // extension is consulted, so a misnamed WAV still decodes.
+        {
+            const auto misnamed = root / "actually_wav.txt";
+            engine::audio::write_pcm16_wav(misnamed, 16000, 1, {0.0F, 1.0F, -1.0F, 0.25F});
+            const auto wav = engine::audio::read_audio_f32(misnamed);
+            require(wav.sample_rate == 16000, "misnamed WAV sample rate mismatch");
+            require(wav.samples.size() == 4, "misnamed WAV sample count mismatch");
+        }
+
         // Unsupported formats name the file and the supported formats.
         {
             const auto other = root / "notes.txt";

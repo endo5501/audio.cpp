@@ -106,26 +106,25 @@ bool is_supported_audio_extension(std::string_view extension) {
 
 WavData read_audio_f32(const std::filesystem::path & path) {
     const std::string label = io::path_to_utf8(path);
-    const auto ext = lower_extension(path);
-    // An extension the decoder does not know is rejected before the file is
-    // read: no point loading megabytes to discover the format is unsupported.
-    if (!ext.empty() && !is_supported_audio_extension(ext)) {
-        throw std::runtime_error("unsupported audio input format: " + label + kSupportedFormats);
-    }
-
     const std::string data = read_file_bytes(path);
     if (data.empty()) {
         throw std::runtime_error("empty audio input: " + label);
     }
+    // Content decides first: a WAV is readable whatever the file is named.
+    // Explicit string_view because a std::string converts to path as well,
+    // which would make the overload set ambiguous.
     if (has_wav_header(data)) {
-        // Explicit string_view: a std::string is convertible to path as well,
-        // so the overload set is ambiguous without it.
         return read_wav_f32(std::string_view(data));
     }
+
+    const auto ext = lower_extension(path);
     // A .wav extension is a declaration, not a hint: content that is not RIFF
     // is a broken WAV rather than something to sniff further.
     if (ext == ".wav") {
         throw std::runtime_error("invalid WAV RIFF header: " + label);
+    }
+    if (!ext.empty() && !is_supported_audio_extension(ext)) {
+        throw std::runtime_error("unsupported audio input format: " + label + kSupportedFormats);
     }
     if (!ext.empty() || is_mp3_data(data)) {
         return read_mp3_f32(label, data);
