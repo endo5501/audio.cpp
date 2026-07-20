@@ -4,8 +4,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifndef ENGINE_TEST_ASSET_ROOT
@@ -72,6 +74,15 @@ void write_raw(const std::filesystem::path & path, const std::string & bytes) {
         throw std::runtime_error("failed to open test file: " + path.string());
     }
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+std::string read_all(const std::filesystem::path & path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("failed to open test file: " + path.string());
+    }
+    return std::string(
+        std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
 
 std::string message_of_failure(const std::filesystem::path & path) {
@@ -160,6 +171,32 @@ int main() {
             require_contains(message, "unsupported audio input format", "unsupported format");
             require_contains(message, "(supported: WAV, MP3)", "unsupported format list");
             require_contains(message, other.string(), "unsupported format path");
+        }
+
+        // In-memory inputs (multipart uploads) must sniff the same formats as
+        // paths: the server admits .mp3 uploads but never spools them to disk.
+        {
+            const auto bytes = read_all(mp3_asset);
+            const auto mp3 = engine::audio::read_audio_f32(std::string_view(bytes));
+            require(mp3.sample_rate == 16000, "in-memory MP3 sample rate mismatch");
+            require(mp3.channels == 1, "in-memory MP3 channel count mismatch");
+            require(mp3.samples.size() > 1000, "in-memory MP3 decoded too few samples");
+
+            const auto wav_path = root / "buffer.wav";
+            write_pcm16_wav(wav_path, 16000, 1, {0, 32767, -32768, 7});
+            const auto wav_bytes = read_all(wav_path);
+            const auto wav = engine::audio::read_audio_f32(std::string_view(wav_bytes));
+            require(wav.sample_rate == 16000, "in-memory WAV sample rate mismatch");
+            require(wav.samples.size() == 4, "in-memory WAV sample count mismatch");
+
+            bool rejected = false;
+            try {
+                engine::audio::read_audio_f32(std::string_view("not audio at all"));
+            } catch (const std::exception & ex) {
+                rejected = std::string(ex.what()).find("unsupported audio input format") !=
+                    std::string::npos;
+            }
+            require(rejected, "in-memory garbage must be rejected as unsupported");
         }
 
         // Error messages cross the C ABI into Dart, which decodes them as UTF-8:

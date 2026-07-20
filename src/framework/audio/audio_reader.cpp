@@ -83,21 +83,23 @@ bool has_wav_header(const std::vector<uint8_t> & data) {
         std::string(reinterpret_cast<const char *>(data.data() + 8), 4) == "WAVE";
 }
 
-WavData read_mp3_f32(const std::filesystem::path & path, const std::vector<uint8_t> & data) {
-    if (data.empty()) {
-        throw std::runtime_error("empty MP3 input: " + display_path(path));
+// `label` names the input in error messages: a UTF-8 path for file inputs, or a
+// generic description for in-memory buffers, which have no name to report.
+WavData read_mp3_f32(const std::string & label, const uint8_t * bytes, size_t size) {
+    if (size == 0) {
+        throw std::runtime_error("empty MP3 input: " + label);
     }
 
     mp3dec_t decoder;
     mp3dec_init(&decoder);
     mp3dec_file_info_t info{};
-    const int rc = mp3dec_load_buf(&decoder, data.data(), data.size(), &info, nullptr, nullptr);
+    const int rc = mp3dec_load_buf(&decoder, bytes, size, &info, nullptr, nullptr);
     if (rc != 0) {
-        throw std::runtime_error("failed to decode MP3 input: " + display_path(path));
+        throw std::runtime_error("failed to decode MP3 input: " + label);
     }
     if (info.buffer == nullptr || info.samples == 0 || info.hz <= 0 || info.channels <= 0) {
         std::free(info.buffer);
-        throw std::runtime_error("decoded MP3 input is empty: " + display_path(path));
+        throw std::runtime_error("decoded MP3 input is empty: " + label);
     }
 
     WavData audio;
@@ -134,10 +136,26 @@ WavData read_audio_f32(const std::filesystem::path & path) {
     const auto data = read_file_bytes(path);
     const bool extension_says_mp3 = is_mp3_extension(ext);
     if (extension_says_mp3 || mp3dec_detect_buf(data.data(), data.size()) != 0) {
-        return read_mp3_f32(path, data);
+        return read_mp3_f32(display_path(path), data.data(), data.size());
     }
 
     throw std::runtime_error("unsupported audio input format: " + display_path(path) + " (supported: WAV, MP3)");
+}
+
+// In-memory inputs (multipart uploads) never reach the filesystem, so there is
+// no extension to consult: the format is decided by the leading bytes alone.
+WavData read_audio_f32(std::string_view input) {
+    if (input.empty()) {
+        throw std::runtime_error("empty audio input");
+    }
+    const auto * bytes = reinterpret_cast<const uint8_t *>(input.data());
+    if (input.size() >= 12 && input.substr(0, 4) == "RIFF" && input.substr(8, 4) == "WAVE") {
+        return read_wav_f32(input);
+    }
+    if (mp3dec_detect_buf(bytes, input.size()) == 0) {
+        return read_mp3_f32("in-memory audio input", bytes, input.size());
+    }
+    throw std::runtime_error("unsupported audio input format (supported: WAV, MP3)");
 }
 
 }  // namespace engine::audio

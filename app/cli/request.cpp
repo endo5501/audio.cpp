@@ -54,7 +54,7 @@ engine::runtime::AudioBuffer read_audio_buffer(std::istream & input) {
 }
 
 engine::runtime::AudioBuffer read_audio_buffer(std::string_view input) {
-    const auto wav = engine::audio::read_wav_f32(input);
+    const auto wav = engine::audio::read_audio_f32(input);
     return engine::runtime::AudioBuffer{
         wav.sample_rate,
         wav.channels,

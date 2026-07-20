@@ -287,10 +287,17 @@ audiocpp_ctx *audiocpp_init(const char *model_dir, int n_threads,
     }
     ctx->model = ctx->registry.load(load_request);
     if (ctx->model == nullptr) {
+      // u8string(), not string(): this message is decoded as UTF-8 by the FFI
+      // host, and path::string() would render a non-ASCII model directory in
+      // the Windows ANSI code page, replacing the error with a decode failure.
+      const auto model_path_utf8 = model_path.u8string();
+      const std::string model_path_text(
+          reinterpret_cast<const char *>(model_path_utf8.data()),
+          model_path_utf8.size());
       g_init_error =
-          spec ? "failed to load Irodori-TTS model from " + model_path.string()
+          spec ? "failed to load Irodori-TTS model from " + model_path_text
                : "Irodori-TTS model spec (irodori_tts.json) not found next to "
-                 "the library or in " + model_path.string();
+                 "the library or in " + model_path_text;
       delete ctx;
       return nullptr;
     }
