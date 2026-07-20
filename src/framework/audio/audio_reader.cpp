@@ -25,6 +25,15 @@
 namespace engine::audio {
 namespace {
 
+// Error messages travel to hosts that decode them as UTF-8 (the Dart FFI layer
+// among them), so paths must not be rendered in the platform's narrow encoding:
+// path::string() yields the ANSI code page on Windows, which turns a Japanese
+// file name into invalid UTF-8 and hides the real error behind a decode failure.
+std::string display_path(const std::filesystem::path & path) {
+    const auto utf8 = path.u8string();
+    return std::string(reinterpret_cast<const char *>(utf8.data()), utf8.size());
+}
+
 std::string lower_extension(const std::filesystem::path & path) {
     std::string ext = path.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char ch) {
@@ -36,13 +45,13 @@ std::string lower_extension(const std::filesystem::path & path) {
 std::vector<uint8_t> read_file_prefix(const std::filesystem::path & path, size_t max_bytes) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
-        throw std::runtime_error("could not open audio input: " + path.string());
+        throw std::runtime_error("could not open audio input: " + display_path(path));
     }
     std::vector<uint8_t> data(max_bytes);
     input.read(reinterpret_cast<char *>(data.data()), static_cast<std::streamsize>(data.size()));
     data.resize(static_cast<size_t>(input.gcount()));
     if (data.empty() && input.bad()) {
-        throw std::runtime_error("failed to read audio input: " + path.string());
+        throw std::runtime_error("failed to read audio input: " + display_path(path));
     }
     return data;
 }
@@ -50,19 +59,19 @@ std::vector<uint8_t> read_file_prefix(const std::filesystem::path & path, size_t
 std::vector<uint8_t> read_file_bytes(const std::filesystem::path & path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
-        throw std::runtime_error("could not open audio input: " + path.string());
+        throw std::runtime_error("could not open audio input: " + display_path(path));
     }
     input.seekg(0, std::ios::end);
     const auto size = input.tellg();
     if (size < 0) {
-        throw std::runtime_error("failed to size audio input: " + path.string());
+        throw std::runtime_error("failed to size audio input: " + display_path(path));
     }
     input.seekg(0, std::ios::beg);
     std::vector<uint8_t> data(static_cast<size_t>(size));
     if (!data.empty()) {
         input.read(reinterpret_cast<char *>(data.data()), static_cast<std::streamsize>(data.size()));
         if (!input) {
-            throw std::runtime_error("failed to read audio input: " + path.string());
+            throw std::runtime_error("failed to read audio input: " + display_path(path));
         }
     }
     return data;
@@ -76,7 +85,7 @@ bool has_wav_header(const std::vector<uint8_t> & data) {
 
 WavData read_mp3_f32(const std::filesystem::path & path, const std::vector<uint8_t> & data) {
     if (data.empty()) {
-        throw std::runtime_error("empty MP3 input: " + path.string());
+        throw std::runtime_error("empty MP3 input: " + display_path(path));
     }
 
     mp3dec_t decoder;
@@ -84,11 +93,11 @@ WavData read_mp3_f32(const std::filesystem::path & path, const std::vector<uint8
     mp3dec_file_info_t info{};
     const int rc = mp3dec_load_buf(&decoder, data.data(), data.size(), &info, nullptr, nullptr);
     if (rc != 0) {
-        throw std::runtime_error("failed to decode MP3 input: " + path.string());
+        throw std::runtime_error("failed to decode MP3 input: " + display_path(path));
     }
     if (info.buffer == nullptr || info.samples == 0 || info.hz <= 0 || info.channels <= 0) {
         std::free(info.buffer);
-        throw std::runtime_error("decoded MP3 input is empty: " + path.string());
+        throw std::runtime_error("decoded MP3 input is empty: " + display_path(path));
     }
 
     WavData audio;
@@ -108,7 +117,7 @@ bool is_mp3_extension(const std::string & ext) {
 WavData read_audio_f32(const std::filesystem::path & path) {
     const auto prefix = read_file_prefix(path, 16);
     if (prefix.empty()) {
-        throw std::runtime_error("empty audio input: " + path.string());
+        throw std::runtime_error("empty audio input: " + display_path(path));
     }
     if (has_wav_header(prefix)) {
         return read_wav_f32(path);
@@ -116,10 +125,10 @@ WavData read_audio_f32(const std::filesystem::path & path) {
 
     const auto ext = lower_extension(path);
     if (ext == ".wav") {
-        throw std::runtime_error("invalid WAV RIFF header: " + path.string());
+        throw std::runtime_error("invalid WAV RIFF header: " + display_path(path));
     }
     if (!ext.empty() && !is_mp3_extension(ext)) {
-        throw std::runtime_error("unsupported audio input format: " + path.string() + " (supported: WAV, MP3)");
+        throw std::runtime_error("unsupported audio input format: " + display_path(path) + " (supported: WAV, MP3)");
     }
 
     const auto data = read_file_bytes(path);
@@ -128,7 +137,7 @@ WavData read_audio_f32(const std::filesystem::path & path) {
         return read_mp3_f32(path, data);
     }
 
-    throw std::runtime_error("unsupported audio input format: " + path.string() + " (supported: WAV, MP3)");
+    throw std::runtime_error("unsupported audio input format: " + display_path(path) + " (supported: WAV, MP3)");
 }
 
 }  // namespace engine::audio

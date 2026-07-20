@@ -162,6 +162,20 @@ int main() {
             require_contains(message, other.string(), "unsupported format path");
         }
 
+        // Error messages cross the C ABI into Dart, which decodes them as UTF-8:
+        // a path rendered in the Windows ANSI code page throws FormatException
+        // there instead of surfacing the real problem.
+        {
+            const auto japanese_text = root / std::filesystem::u8path("月ノ美兎.txt");
+            write_raw(japanese_text, "this is not audio at all, just text bytes");
+            const auto message = message_of_failure(japanese_text);
+            const auto utf8 = japanese_text.u8string();
+            require_contains(
+                message,
+                std::string(reinterpret_cast<const char *>(utf8.data()), utf8.size()),
+                "non-ASCII path is reported as UTF-8");
+        }
+
         // Empty and corrupt inputs fail with a path, and never crash.
         {
             const auto empty = root / "empty.mp3";
