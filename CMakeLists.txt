@@ -802,6 +802,16 @@ if (ENGINE_BUILD_TESTS)
         COMMAND wav_reader_test
     )
 
+    add_engine_unittest(audio_reader_test tests/unittests/test_audio_reader.cpp)
+    target_compile_definitions(audio_reader_test PRIVATE
+        ENGINE_TEST_ASSET_ROOT="${ENGINE_UNITTEST_ASSET_ROOT}"
+    )
+
+    add_test(
+        NAME audio_reader_test
+        COMMAND audio_reader_test
+    )
+
     add_engine_unittest(audio_chunking_test tests/unittests/test_audio_chunking.cpp)
 
     add_test(
