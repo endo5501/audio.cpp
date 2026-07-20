@@ -1,6 +1,6 @@
 #include "audiocpp_c_api.h"
 
-#include "engine/framework/audio/wav_reader.h"
+#include "engine/framework/audio/audio_reader.h"
 #include "engine/framework/core/module.h"
 #include "engine/framework/runtime/model.h"
 #include "engine/framework/runtime/registry.h"
@@ -161,7 +161,10 @@ resolve_model_spec(const std::filesystem::path &model_dir) {
 }
 
 engine::runtime::AudioBuffer read_audio_buffer(const std::filesystem::path &path) {
-  const auto wav = engine::audio::read_wav_f32(path);
+  // read_audio_f32, not read_wav_f32: voices/ has always offered .mp3 as well
+  // as .wav, and the WAV-only reader rejected MP3 references with the opaque
+  // "invalid WAV RIFF header".
+  const auto wav = engine::audio::read_audio_f32(path);
   return engine::runtime::AudioBuffer{wav.sample_rate, wav.channels, wav.samples};
 }
 
