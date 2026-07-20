@@ -1,5 +1,6 @@
 #include "engine/framework/audio/wav_reader.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <stdexcept>
@@ -63,6 +64,73 @@ void skip_bytes(std::istream & input, std::streamoff count) {
     }
 }
 
+// Bytes left between the current position and the end of the input, used to
+// clamp chunk sizes whose header field claims more than the file holds.
+std::streamoff remaining_bytes(std::istream & input) {
+    const std::streampos current = input.tellg();
+    if (current < 0) {
+        return 0;
+    }
+    input.seekg(0, std::ios::end);
+    const std::streampos end = input.tellg();
+    input.seekg(current, std::ios::beg);
+    if (!input || end < current) {
+        input.clear();
+        input.seekg(current, std::ios::beg);
+        return 0;
+    }
+    return end - current;
+}
+
+constexpr uint16_t kWaveFormatPcm = 0x0001;
+constexpr uint16_t kWaveFormatIeeeFloat = 0x0003;
+constexpr uint16_t kWaveFormatExtensible = 0xFFFE;
+
+// WAVE_FORMAT_EXTENSIBLE keeps the real format tag in the first two bytes of
+// the SubFormat GUID. The extension is 22 bytes: cbSize is followed by
+// wValidBitsPerSample (2) + dwChannelMask (4) + the 16-byte GUID.
+constexpr uint32_t kExtensibleFmtChunkSize = 40;
+constexpr std::streamoff kBytesBeforeSubFormatGuid = 8;
+
+// A truncated extension is not fatal: some writers copy only the 18-byte
+// WAVEFORMATEX and leave the GUID out, so fall back to the bit depth.
+uint16_t format_from_bits_per_sample(uint16_t bits_per_sample) {
+    return bits_per_sample == 32 ? kWaveFormatIeeeFloat : kWaveFormatPcm;
+}
+
+void parse_fmt_chunk(
+    std::istream & input,
+    std::streamoff chunk_size,
+    uint16_t & audio_format,
+    uint16_t & channels,
+    uint32_t & sample_rate,
+    uint16_t & bits_per_sample) {
+    if (chunk_size < 16) {
+        throw std::runtime_error("malformed WAV fmt chunk");
+    }
+
+    audio_format = read_scalar<uint16_t>(input);
+    channels = read_scalar<uint16_t>(input);
+    sample_rate = read_scalar<uint32_t>(input);
+    skip_bytes(input, 6);
+    bits_per_sample = read_scalar<uint16_t>(input);
+    std::streamoff consumed = 16;
+
+    if (audio_format == kWaveFormatExtensible) {
+        if (chunk_size >= static_cast<std::streamoff>(kExtensibleFmtChunkSize)) {
+            skip_bytes(input, kBytesBeforeSubFormatGuid);
+            audio_format = read_scalar<uint16_t>(input);
+            consumed += kBytesBeforeSubFormatGuid + 2;
+        } else {
+            audio_format = format_from_bits_per_sample(bits_per_sample);
+        }
+    }
+
+    if (chunk_size > consumed) {
+        skip_bytes(input, chunk_size - consumed);
+    }
+}
+
 }  // namespace
 
 WavData read_wav_f32(std::istream & input) {
@@ -88,34 +156,52 @@ WavData read_wav_f32(std::istream & input) {
     uint16_t bits_per_sample = 0;
     std::vector<char> data;
 
+    bool have_fmt = false;
+    bool have_data = false;
+
     while (input) {
         char chunk_id[4];
         input.read(chunk_id, 4);
-        if (!input) {
+        if (input.gcount() != 4) {
             break;
         }
-        const uint32_t chunk_size = read_scalar<uint32_t>(input);
         const std::string id(chunk_id, 4);
-        if (id == "fmt ") {
-            audio_format = read_scalar<uint16_t>(input);
-            channels = read_scalar<uint16_t>(input);
-            sample_rate = read_scalar<uint32_t>(input);
-            skip_bytes(input, 6);
-            bits_per_sample = read_scalar<uint16_t>(input);
-            if (chunk_size > 16) {
-                skip_bytes(input, static_cast<std::streamoff>(chunk_size - 16));
+
+        // Once fmt and data are both in hand the audio is recoverable, so
+        // damage found further along stops the walk instead of discarding what
+        // was already parsed. Writers do leave debris behind the data chunk:
+        // record_windows overwrites its sink writer's header with a shorter one
+        // and leaves the tail of the old header in the file.
+        try {
+            const uint32_t chunk_size = read_scalar<uint32_t>(input);
+            // A size field that claims more than the file holds is a header
+            // defect, not a reason to give up on the samples that are there.
+            const std::streamoff size = std::min<std::streamoff>(
+                static_cast<std::streamoff>(chunk_size), remaining_bytes(input));
+
+            if (id == "fmt ") {
+                parse_fmt_chunk(input, size, audio_format, channels, sample_rate, bits_per_sample);
+                have_fmt = true;
+            } else if (id == "data") {
+                data.resize(static_cast<size_t>(size));
+                if (size > 0) {
+                    input.read(data.data(), static_cast<std::streamsize>(size));
+                    if (input.gcount() != size) {
+                        throw std::runtime_error("failed to read WAV data chunk");
+                    }
+                }
+                have_data = true;
+            } else {
+                skip_bytes(input, size);
             }
-        } else if (id == "data") {
-            data.resize(chunk_size);
-            input.read(data.data(), static_cast<std::streamsize>(chunk_size));
-            if (!input) {
-                throw std::runtime_error("failed to read WAV data chunk");
+            if (chunk_size % 2 == 1) {
+                skip_bytes(input, 1);
             }
-        } else {
-            skip_bytes(input, chunk_size);
-        }
-        if (chunk_size % 2 == 1) {
-            skip_bytes(input, 1);
+        } catch (const std::runtime_error &) {
+            if (!have_fmt || !have_data) {
+                throw;
+            }
+            break;
         }
     }
 
