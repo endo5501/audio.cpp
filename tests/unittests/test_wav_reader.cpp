@@ -318,7 +318,9 @@ void test_junk_and_filler_chunks() {
 // --- 1.7 Debris after a complete parse -------------------------------------
 void test_trailing_garbage_after_data() {
     // record_windows leaves its sink writer's old header behind; the reader
-    // walks into it and reads a bogus id plus an enormous size.
+    // walks into it and reads a bogus (non-printable) id. That id is the
+    // debris signal: the walk stops, and the well-sized data payload survives
+    // the trailing-chunk scan untouched.
     std::string trailing;
     // Embedded NULs, so the length must be explicit: appending this as a C
     // string would stop at the first byte and silently shrink the fixture.
@@ -338,6 +340,21 @@ void test_trailing_garbage_after_data() {
     require_pcm16_samples(wav, "trailing garbage");
 }
 
+// The walk dies mid-header after fmt and data are complete. The clamp cannot
+// defuse this one (the header itself is cut short), so it is the case that
+// actually exercises the completed-parse tolerance.
+void test_truncated_chunk_header_after_data() {
+    const std::string input = build_wav(
+        {
+            chunk("fmt ", fmt_body(1u, 1, 16000, 16)),
+            chunk("data", pcm16_payload(kPcm16Samples)),
+        },
+        std::string("LIST\x01\x01", 6));
+
+    const auto wav = engine::audio::read_wav_f32(std::string_view(input));
+    require_pcm16_samples(wav, "truncated trailing header");
+}
+
 // --- 1.8 data chunk that claims more than the input holds -------------------
 void test_oversized_data_chunk_size() {
     const std::string payload = pcm16_payload(kPcm16Samples);
@@ -351,6 +368,100 @@ void test_oversized_data_chunk_size() {
     require_pcm16_samples(wav, "oversized data");
 }
 
+// A streaming writer that never patched the header: data claims 0xFFFFFFFF and
+// the payload genuinely runs to EOF. Everything up to EOF is audio.
+void test_unpatched_streaming_size_reads_to_eof() {
+    const std::string input = build_wav({
+        chunk("fmt ", fmt_body(1u, 1, 16000, 16)),
+        chunk_with_size("data", 0xFFFFFFFFu, pcm16_payload(kPcm16Samples)),
+    });
+
+    const auto wav = engine::audio::read_wav_f32(std::string_view(input));
+    require_pcm16_samples(wav, "unpatched streaming size");
+}
+
+// Same unpatched size, but metadata follows the payload. A clamp alone would
+// decode the LIST chunk as near-full-scale samples ("LIST"/"INFO" bytes sit at
+// ~0.6 amplitude as int16) - a loud burst appended to the reference voice. The
+// trailing-chunk scan must cut the audio at the chunk boundary instead.
+void test_unpatched_streaming_size_excludes_trailing_chunks() {
+    const std::string input = build_wav({
+        chunk("fmt ", fmt_body(1u, 1, 16000, 16)),
+        chunk_with_size("data", 0xFFFFFFFFu, pcm16_payload(kPcm16Samples)),
+        chunk("LIST", std::string("INFOLavf58")),
+    });
+
+    const auto wav = engine::audio::read_wav_f32(std::string_view(input));
+    require_pcm16_samples(wav, "streaming size with trailing LIST");
+}
+
+// data overstated by a few bytes, swallowing the head of the next chunk. The
+// swallowed "LIST" id would otherwise become two garbage samples.
+void test_overstated_data_size_excludes_trailing_chunks() {
+    const std::string payload = pcm16_payload(kPcm16Samples);
+    const std::string input = build_wav({
+        chunk("fmt ", fmt_body(1u, 1, 16000, 16)),
+        chunk_with_size("data", static_cast<uint32_t>(payload.size() + 4), payload),
+        chunk("LIST", std::string("INFOLavf58")),
+    });
+
+    const auto wav = engine::audio::read_wav_f32(std::string_view(input));
+    require_pcm16_samples(wav, "overstated data with trailing LIST");
+}
+
+// The record_windows shape end to end: the declared payload STARTS with the
+// tail of an older header (filler + a small fmt chunk + a data header whose
+// size runs exactly to EOF), the real PCM follows, and the last bytes of PCM
+// sit past the declared range so the walk trips the debris signal. The
+// trailing-chunk scan must NOT cut at the embedded old header - its chain
+// contains fmt/data, meaning the audio lives inside it, not after it.
+void test_embedded_old_header_is_not_a_truncation_point() {
+    // 100 zero samples: their 0x00 bytes double as the non-printable debris
+    // the walk reads past the declared payload end.
+    std::string pcm;
+    for (int i = 0; i < 100; ++i) {
+        append_le<uint16_t>(pcm, 0u);
+    }
+
+    // 36 bytes of old-header debris, mirroring the real files: 2 filler bytes,
+    // an 18-byte-body fmt chunk, and a data header pointing exactly at EOF.
+    std::string debris(2, '\0');
+    std::string old_fmt = fmt_body(1u, 1, 16000, 16);
+    append_le<uint16_t>(old_fmt, 0u);  // cbSize: the 18-byte WAVEFORMATEX tail
+    debris += chunk("fmt ", old_fmt);
+    debris += "data";
+    append_le<uint32_t>(debris, static_cast<uint32_t>(pcm.size()));
+
+    // The new header declares debris + PCM minus the 36-byte tail, exactly as
+    // record_windows misplaces it.
+    const std::string payload = debris + pcm;
+    const std::string input = build_wav({
+        chunk("fmt ", fmt_body(1u, 1, 16000, 16)),
+        chunk_with_size(
+            "data",
+            static_cast<uint32_t>(payload.size() - 36),
+            payload.substr(0, payload.size() - 36)),
+    }, payload.substr(payload.size() - 36));
+
+    const auto wav = engine::audio::read_wav_f32(std::string_view(input));
+    require(
+        wav.samples.size() == (payload.size() - 36) / 2,
+        "embedded old header must not truncate the audio");
+}
+
+// A zero-size data chunk is a placeholder a broken writer left, not the data:
+// it must not claim the slot and lock out the real chunk that follows.
+void test_zero_size_data_placeholder_does_not_block_the_real_one() {
+    const std::string input = build_wav({
+        chunk("fmt ", fmt_body(1u, 1, 16000, 16)),
+        chunk("data", std::string()),
+        chunk("data", pcm16_payload(kPcm16Samples)),
+    });
+
+    const auto wav = engine::audio::read_wav_f32(std::string_view(input));
+    require_pcm16_samples(wav, "zero-size data placeholder");
+}
+
 // --- 1.9 Cases that must keep failing --------------------------------------
 void test_incomplete_inputs_still_fail() {
     require_throws(
@@ -361,8 +472,9 @@ void test_incomplete_inputs_still_fail() {
         build_wav({chunk("fmt ", fmt_body(1u, 1, 16000, 16))}),
         "WAV without a data chunk");
 
-    // A corrupt chunk size before fmt: nothing usable has been parsed yet, so
-    // this must not be swallowed by the trailing-corruption tolerance.
+    // A corrupt chunk size before fmt is clamped and skipped, which consumes
+    // the rest of the input - the parse then fails as incomplete. (The clamp
+    // means no exception fires inside the walk for this shape.)
     require_throws(
         build_wav({
             chunk_with_size("JUNK", 1u << 20, std::string(8, '\0')),
@@ -370,6 +482,16 @@ void test_incomplete_inputs_still_fail() {
             chunk("data", pcm16_payload(kPcm16Samples)),
         }),
         "WAV with a corrupt chunk before fmt");
+
+    // A fmt chunk shorter than its 16 mandatory bytes throws inside the walk
+    // before anything usable is parsed - the completed-parse tolerance must
+    // rethrow this, not swallow it.
+    require_throws(
+        build_wav({
+            chunk("fmt ", fmt_body(1u, 1, 16000, 16).substr(0, 8)),
+            chunk("data", pcm16_payload(kPcm16Samples)),
+        }),
+        "WAV with a malformed fmt chunk");
 }
 
 void test_pcm24_from_file() {
@@ -415,7 +537,17 @@ int run_all() {
         {"extensible_unknown_subformat", test_extensible_unknown_subformat},
         {"junk_and_filler_chunks", test_junk_and_filler_chunks},
         {"trailing_garbage_after_data", test_trailing_garbage_after_data},
+        {"truncated_chunk_header_after_data", test_truncated_chunk_header_after_data},
         {"oversized_data_chunk_size", test_oversized_data_chunk_size},
+        {"unpatched_streaming_size_reads_to_eof", test_unpatched_streaming_size_reads_to_eof},
+        {"unpatched_streaming_size_excludes_trailing_chunks",
+         test_unpatched_streaming_size_excludes_trailing_chunks},
+        {"overstated_data_size_excludes_trailing_chunks",
+         test_overstated_data_size_excludes_trailing_chunks},
+        {"zero_size_data_placeholder_does_not_block_the_real_one",
+         test_zero_size_data_placeholder_does_not_block_the_real_one},
+        {"embedded_old_header_is_not_a_truncation_point",
+         test_embedded_old_header_is_not_a_truncation_point},
         {"incomplete_inputs_still_fail", test_incomplete_inputs_still_fail},
     };
 

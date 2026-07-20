@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -111,6 +112,115 @@ uint16_t format_from_bits_per_sample(uint16_t bits_per_sample) {
     return kWaveFormatExtensible;
 }
 
+// RIFF ids are four printable-ASCII bytes. Anything else after the payload is
+// debris, not a chunk - the signal that some size field upstream was wrong.
+bool is_plausible_chunk_id(const char * id) {
+    for (int i = 0; i < 4; ++i) {
+        const unsigned char c = static_cast<unsigned char>(id[i]);
+        if (c < 0x20 || c > 0x7E) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Reads a chunk header at an absolute input offset, out of the data buffer
+// when the bytes are there (they usually are - the bad size read them in as
+// "audio") and from the stream when the header straddles the buffer's end.
+bool read_chunk_header_at(
+    std::istream & input,
+    const std::vector<char> & data,
+    std::streamoff data_offset,
+    std::streamoff pos,
+    char (&id)[4],
+    uint32_t & size) {
+    const std::streamoff rel = pos - data_offset;
+    if (rel >= 0 && rel + 8 <= static_cast<std::streamoff>(data.size())) {
+        std::memcpy(id, data.data() + rel, 4);
+        std::memcpy(&size, data.data() + rel + 4, 4);
+        return true;
+    }
+    input.clear();
+    input.seekg(pos, std::ios::beg);
+    input.read(id, 4);
+    if (input.gcount() != 4) {
+        return false;
+    }
+    input.read(reinterpret_cast<char *>(&size), 4);
+    return input.gcount() == 4;
+}
+
+// True when a chain of plausible chunks starting at `pos` walks exactly to the
+// end of the input. Exactness is the safety net: a random 4-printable-byte run
+// inside real audio almost never carries a size that lands on EOF, so false
+// positives - which would truncate genuine samples - stay negligible, and the
+// scan only runs on files whose data size already proved unreliable.
+bool chunk_chain_reaches_end(
+    std::istream & input,
+    const std::vector<char> & data,
+    std::streamoff data_offset,
+    std::streamoff pos,
+    std::streamoff input_end) {
+    while (pos + 8 <= input_end) {
+        char id[4];
+        uint32_t size = 0;
+        if (!read_chunk_header_at(input, data, data_offset, pos, id, size)) {
+            return false;
+        }
+        if (!is_plausible_chunk_id(id)) {
+            return false;
+        }
+        // A chain carrying fmt or data is not trailing metadata - it is an
+        // older header embedded at the head of the payload (record_windows
+        // buries its sink writer's header there, and its data chunk points
+        // exactly at EOF). Truncating at such a chain would cut away the
+        // audio itself, so it is never a truncation point.
+        if (std::memcmp(id, "fmt ", 4) == 0 || std::memcmp(id, "data", 4) == 0) {
+            return false;
+        }
+        const std::streamoff next = pos + 8 + static_cast<std::streamoff>(size);
+        if (next == input_end) {
+            return true;
+        }
+        // RIFF pads odd-sized chunks; accept the padded end too.
+        const std::streamoff padded = next + (size % 2);
+        if (padded == input_end) {
+            return true;
+        }
+        if (padded > input_end) {
+            return false;
+        }
+        pos = padded;
+    }
+    return false;
+}
+
+// When the data chunk's declared size proved unreliable (it was clamped, or
+// the walk hit debris right after it), bytes at the tail of `data` may really
+// be trailing chunks (LIST/INFO, id3, ...) that the bad size swallowed. Those
+// decode as near-full-scale garbage samples, so find the first position whose
+// chunk chain runs exactly to EOF and cut the audio there.
+void truncate_swallowed_trailing_chunks(
+    std::istream & input,
+    std::vector<char> & data,
+    std::streamoff data_offset) {
+    input.clear();
+    input.seekg(0, std::ios::end);
+    const std::streamoff input_end = input.tellg();
+    if (input_end < 0) {
+        return;
+    }
+    // A swallowed chain necessarily starts inside what was read as audio.
+    for (size_t p = 0; p < data.size(); ++p) {
+        if (chunk_chain_reaches_end(
+                input, data, data_offset,
+                data_offset + static_cast<std::streamoff>(p), input_end)) {
+            data.resize(p);
+            return;
+        }
+    }
+}
+
 void parse_fmt_chunk(
     std::istream & input,
     std::streamoff chunk_size,
@@ -171,6 +281,11 @@ WavData read_wav_f32(std::istream & input) {
 
     bool have_fmt = false;
     bool have_data = false;
+    // Set when the data chunk's size field proved unreliable: it was clamped,
+    // or the walk ran into debris right behind the payload. Either way the
+    // tail of `data` may hold swallowed trailing chunks rather than audio.
+    bool data_size_untrusted = false;
+    std::streamoff data_payload_offset = -1;
 
     while (input) {
         char chunk_id[4];
@@ -180,11 +295,18 @@ WavData read_wav_f32(std::istream & input) {
         }
         const std::string id(chunk_id, 4);
 
+        // With fmt and data both in hand, a non-printable id is not a chunk -
+        // it is debris (record_windows leaves the tail of its sink writer's
+        // old header behind the payload). Stop the walk and flag the size as
+        // suspect instead of decoding garbage sizes.
+        if (have_fmt && have_data && !is_plausible_chunk_id(chunk_id)) {
+            data_size_untrusted = true;
+            break;
+        }
+
         // Once fmt and data are both in hand the audio is recoverable, so
         // damage found further along stops the walk instead of discarding what
-        // was already parsed. Writers do leave debris behind the data chunk:
-        // record_windows overwrites its sink writer's header with a shorter one
-        // and leaves the tail of the old header in the file.
+        // was already parsed.
         try {
             const uint32_t chunk_size = read_scalar<uint32_t>(input);
             // A size field that claims more than the file holds is a header
@@ -199,6 +321,10 @@ WavData read_wav_f32(std::istream & input) {
                 parse_fmt_chunk(input, size, audio_format, channels, sample_rate, bits_per_sample);
                 have_fmt = true;
             } else if (id == "data" && !have_data) {
+                if (static_cast<std::streamoff>(chunk_size) != size) {
+                    data_size_untrusted = true;
+                }
+                data_payload_offset = input.tellg();
                 data.resize(static_cast<size_t>(size));
                 if (size > 0) {
                     input.read(data.data(), static_cast<std::streamsize>(size));
@@ -206,7 +332,9 @@ WavData read_wav_f32(std::istream & input) {
                         throw std::runtime_error("failed to read WAV data chunk");
                     }
                 }
-                have_data = true;
+                // A zero-size chunk is a placeholder a broken writer left, not
+                // the data: leave the slot open for the real one.
+                have_data = !data.empty();
             } else {
                 skip_bytes(input, size);
             }
@@ -217,8 +345,13 @@ WavData read_wav_f32(std::istream & input) {
             if (!have_fmt || !have_data) {
                 throw;
             }
+            data_size_untrusted = true;
             break;
         }
+    }
+
+    if (data_size_untrusted && !data.empty() && data_payload_offset >= 0) {
+        truncate_swallowed_trailing_chunks(input, data, data_payload_offset);
     }
 
     if (channels == 0 || sample_rate == 0 || bits_per_sample == 0 || data.empty()) {
