@@ -1,6 +1,7 @@
 #include "audiocpp_c_api.h"
 
 #include "engine/framework/audio/audio_reader.h"
+#include "engine/framework/io/filesystem.h"
 #include "engine/framework/core/module.h"
 #include "engine/framework/runtime/model.h"
 #include "engine/framework/runtime/registry.h"
@@ -81,6 +82,46 @@ struct audiocpp_ctx {
 };
 
 namespace {
+
+// Every error crossing this ABI is decoded as UTF-8 by the FFI host, and a
+// strict decoder (Dart's among them) throws on invalid bytes, replacing the
+// real message with a decode failure. Messages this shim writes itself use
+// engine::io::path_to_utf8 for paths, but exceptions bubble up from the whole
+// engine, where paths are still rendered in the platform narrow encoding, so
+// anything not already valid UTF-8 is repaired here rather than at ~70 leaf
+// call sites. Invalid bytes become U+FFFD: mojibake still names the failure,
+// an undecodable string hides it.
+std::string to_valid_utf8(const std::string &text) {
+  static constexpr char kReplacement[] = "\xEF\xBF\xBD";
+  std::string out;
+  out.reserve(text.size());
+  size_t i = 0;
+  while (i < text.size()) {
+    const auto lead = static_cast<unsigned char>(text[i]);
+    size_t length = 0;
+    if (lead < 0x80) {
+      length = 1;
+    } else if ((lead & 0xE0) == 0xC0) {
+      length = 2;
+    } else if ((lead & 0xF0) == 0xE0) {
+      length = 3;
+    } else if ((lead & 0xF8) == 0xF0) {
+      length = 4;
+    }
+    bool valid = length > 0 && i + length <= text.size();
+    for (size_t k = 1; valid && k < length; ++k) {
+      valid = (static_cast<unsigned char>(text[i + k]) & 0xC0) == 0x80;
+    }
+    if (!valid) {
+      out += kReplacement;
+      ++i;
+      continue;
+    }
+    out.append(text, i, length);
+    i += length;
+  }
+  return out;
+}
 
 std::filesystem::path path_from_utf8(const char *utf8) {
   if (utf8 == nullptr) {
@@ -287,13 +328,7 @@ audiocpp_ctx *audiocpp_init(const char *model_dir, int n_threads,
     }
     ctx->model = ctx->registry.load(load_request);
     if (ctx->model == nullptr) {
-      // u8string(), not string(): this message is decoded as UTF-8 by the FFI
-      // host, and path::string() would render a non-ASCII model directory in
-      // the Windows ANSI code page, replacing the error with a decode failure.
-      const auto model_path_utf8 = model_path.u8string();
-      const std::string model_path_text(
-          reinterpret_cast<const char *>(model_path_utf8.data()),
-          model_path_utf8.size());
+      const std::string model_path_text = engine::io::path_to_utf8(model_path);
       g_init_error =
           spec ? "failed to load Irodori-TTS model from " + model_path_text
                : "Irodori-TTS model spec (irodori_tts.json) not found next to "
@@ -322,7 +357,7 @@ audiocpp_ctx *audiocpp_init(const char *model_dir, int n_threads,
     return ctx;
   } catch (const std::exception &ex) {
     // Invalid model path / load failure: return null without crashing.
-    g_init_error = ex.what();
+    g_init_error = to_valid_utf8(ex.what());
     delete ctx;
     return nullptr;
   } catch (...) {
@@ -398,7 +433,7 @@ int audiocpp_synthesize(audiocpp_ctx *ctx, const char *text,
     ctx->last_error.clear();
     return 0;
   } catch (const std::exception &ex) {
-    ctx->last_error = ex.what();
+    ctx->last_error = to_valid_utf8(ex.what());
     return -1;
   } catch (...) {
     ctx->last_error = "unknown Irodori-TTS synthesis error";

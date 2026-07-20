@@ -1,6 +1,10 @@
 #include "engine/framework/audio/audio_reader.h"
 
-#include <cstdint>
+#include "engine/framework/audio/wav_writer.h"
+#include "engine/framework/io/filesystem.h"
+
+#include "test_assert.h"
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -16,62 +20,12 @@
 
 namespace {
 
-void require(bool condition, const std::string & message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
-
-template <typename T>
-void write_le(std::ofstream & output, T value) {
-    output.write(reinterpret_cast<const char *>(&value), sizeof(T));
-    if (!output) {
-        throw std::runtime_error("failed to write test WAV");
-    }
-}
-
-void write_bytes(std::ofstream & output, const char * bytes, std::streamsize count) {
-    output.write(bytes, count);
-    if (!output) {
-        throw std::runtime_error("failed to write test WAV");
-    }
-}
-
-// 16-bit PCM WAV, mirroring what the reference-audio path actually receives.
-void write_pcm16_wav(
-    const std::filesystem::path & path,
-    int sample_rate,
-    int channels,
-    const std::vector<int16_t> & samples) {
-    const uint32_t data_bytes = static_cast<uint32_t>(samples.size() * sizeof(int16_t));
-    const uint16_t block_align = static_cast<uint16_t>(channels * 2);
-
-    std::ofstream output(path, std::ios::binary);
-    if (!output) {
-        throw std::runtime_error("failed to open test WAV: " + path.string());
-    }
-    write_bytes(output, "RIFF", 4);
-    write_le<uint32_t>(output, 36u + data_bytes);
-    write_bytes(output, "WAVE", 4);
-    write_bytes(output, "fmt ", 4);
-    write_le<uint32_t>(output, 16u);
-    write_le<uint16_t>(output, 1u);
-    write_le<uint16_t>(output, static_cast<uint16_t>(channels));
-    write_le<uint32_t>(output, static_cast<uint32_t>(sample_rate));
-    write_le<uint32_t>(output, static_cast<uint32_t>(sample_rate * block_align));
-    write_le<uint16_t>(output, block_align);
-    write_le<uint16_t>(output, 16u);
-    write_bytes(output, "data", 4);
-    write_le<uint32_t>(output, data_bytes);
-    for (const int16_t sample : samples) {
-        write_le<int16_t>(output, sample);
-    }
-}
+using engine::test::require;
 
 void write_raw(const std::filesystem::path & path, const std::string & bytes) {
     std::ofstream output(path, std::ios::binary);
     if (!output) {
-        throw std::runtime_error("failed to open test file: " + path.string());
+        throw std::runtime_error("failed to open test file: " + engine::io::path_to_utf8(path));
     }
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
@@ -79,7 +33,7 @@ void write_raw(const std::filesystem::path & path, const std::string & bytes) {
 std::string read_all(const std::filesystem::path & path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
-        throw std::runtime_error("failed to open test file: " + path.string());
+        throw std::runtime_error("failed to open test file: " + engine::io::path_to_utf8(path));
     }
     return std::string(
         std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
@@ -91,7 +45,7 @@ std::string message_of_failure(const std::filesystem::path & path) {
     } catch (const std::exception & ex) {
         return ex.what();
     }
-    throw std::runtime_error("expected a failure for: " + path.string());
+    throw std::runtime_error("expected a failure for: " + engine::io::path_to_utf8(path));
 }
 
 void require_contains(
@@ -109,7 +63,8 @@ int main() {
     try {
         const std::filesystem::path asset_root(ENGINE_TEST_ASSET_ROOT);
         const auto mp3_asset = asset_root / "framework" / "audio" / "tone_440hz_16k_mono.mp3";
-        require(std::filesystem::exists(mp3_asset), "missing MP3 fixture: " + mp3_asset.string());
+        require(std::filesystem::exists(mp3_asset),
+                "missing MP3 fixture: " + engine::io::path_to_utf8(mp3_asset));
 
         const auto root = std::filesystem::temp_directory_path() / "audio_cpp_audio_reader_test";
         std::filesystem::remove_all(root);
@@ -134,7 +89,7 @@ int main() {
         // WAV still goes through the existing reader unchanged.
         {
             const auto wav_path = root / "tone.wav";
-            write_pcm16_wav(wav_path, 24000, 2, {0, 32767, -32768, 1234});
+            engine::audio::write_pcm16_wav(wav_path, 24000, 2, {0.0F, 1.0F, -1.0F, 0.25F});
             const auto via_audio = engine::audio::read_audio_f32(wav_path);
             const auto via_wav = engine::audio::read_wav_f32(wav_path);
             require(via_audio.sample_rate == via_wav.sample_rate, "WAV sample rate regression");
@@ -183,7 +138,7 @@ int main() {
             require(mp3.samples.size() > 1000, "in-memory MP3 decoded too few samples");
 
             const auto wav_path = root / "buffer.wav";
-            write_pcm16_wav(wav_path, 16000, 1, {0, 32767, -32768, 7});
+            engine::audio::write_pcm16_wav(wav_path, 16000, 1, {0.0F, 1.0F, -1.0F, 0.25F});
             const auto wav_bytes = read_all(wav_path);
             const auto wav = engine::audio::read_audio_f32(std::string_view(wav_bytes));
             require(wav.sample_rate == 16000, "in-memory WAV sample rate mismatch");

@@ -8,6 +8,13 @@
 
 namespace engine::io {
 
+// Renders `path` as UTF-8, for messages that leave the process (C ABI errors,
+// logs, JSON). path::string() yields the platform's narrow encoding, which on
+// Windows is the ANSI code page: a non-ASCII path becomes invalid UTF-8 and
+// hosts that decode strictly (the Dart FFI layer among them) report a decode
+// failure instead of the error that actually occurred.
+std::string path_to_utf8(const std::filesystem::path & path);
+
 bool is_existing_directory(const std::filesystem::path & path);
 bool is_existing_file(const std::filesystem::path & path);
 

@@ -5,6 +5,7 @@
 #include "../cli/request.h"
 #include "../streaming/streaming.h"
 
+#include "engine/framework/audio/audio_reader.h"
 #include "engine/framework/io/json.h"
 #include "engine/framework/runtime/registry.h"
 
@@ -247,7 +248,8 @@ bool is_supported_audio_upload_filename(const std::string & filename) {
     for (char & ch : ext) {
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     }
-    return ext.empty() || ext == ".wav" || ext == ".mp3" || ext == ".mpa" || ext == ".mpeg";
+    // Extensionless uploads are admitted and left to the reader to sniff.
+    return ext.empty() || engine::audio::is_supported_audio_extension(ext);
 }
 
 double elapsed_ms(Clock::time_point started) {
