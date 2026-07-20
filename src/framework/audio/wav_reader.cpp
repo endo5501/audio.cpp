@@ -66,6 +66,11 @@ void skip_bytes(std::istream & input, std::streamoff count) {
 
 // Bytes left between the current position and the end of the input, used to
 // clamp chunk sizes whose header field claims more than the file holds.
+//
+// Returns 0 when the position cannot be determined. That conflation is safe
+// only because this reader already requires a seekable stream — the RIFF size
+// field is stepped over with a seek before any chunk is read, so a pipe-backed
+// stream fails there and never reaches this point.
 std::streamoff remaining_bytes(std::istream & input) {
     const std::streampos current = input.tellg();
     if (current < 0) {
@@ -94,8 +99,16 @@ constexpr std::streamoff kBytesBeforeSubFormatGuid = 8;
 
 // A truncated extension is not fatal: some writers copy only the 18-byte
 // WAVEFORMATEX and leave the GUID out, so fall back to the bit depth.
+//
+// 32 bits is the exception. Integer PCM32 and IEEE float32 share the layout,
+// and only the GUID tells them apart, so guessing would reinterpret integer
+// samples as floats and emit garbage. Leave the tag as EXTENSIBLE there so it
+// falls through to the unsupported-encoding error instead.
 uint16_t format_from_bits_per_sample(uint16_t bits_per_sample) {
-    return bits_per_sample == 32 ? kWaveFormatIeeeFloat : kWaveFormatPcm;
+    if (bits_per_sample == 16 || bits_per_sample == 24) {
+        return kWaveFormatPcm;
+    }
+    return kWaveFormatExtensible;
 }
 
 void parse_fmt_chunk(
@@ -179,10 +192,13 @@ WavData read_wav_f32(std::istream & input) {
             const std::streamoff size = std::min<std::streamoff>(
                 static_cast<std::streamoff>(chunk_size), remaining_bytes(input));
 
-            if (id == "fmt ") {
+            // A second fmt or data chunk is not a layout any real WAV uses, so
+            // it is debris that happens to spell the right four bytes. Keeping
+            // the first one stops it from truncating audio already read.
+            if (id == "fmt " && !have_fmt) {
                 parse_fmt_chunk(input, size, audio_format, channels, sample_rate, bits_per_sample);
                 have_fmt = true;
-            } else if (id == "data") {
+            } else if (id == "data" && !have_data) {
                 data.resize(static_cast<size_t>(size));
                 if (size > 0) {
                     input.read(data.data(), static_cast<std::streamsize>(size));
@@ -213,7 +229,7 @@ WavData read_wav_f32(std::istream & input) {
     wav.sample_rate = static_cast<int>(sample_rate);
     wav.channels = static_cast<int>(channels);
 
-    if (audio_format == 1 && bits_per_sample == 16) {
+    if (audio_format == kWaveFormatPcm && bits_per_sample == 16) {
         const size_t sample_count = data.size() / sizeof(int16_t);
         wav.samples.resize(sample_count);
         const auto * pcm = reinterpret_cast<const int16_t *>(data.data());
@@ -223,7 +239,7 @@ WavData read_wav_f32(std::istream & input) {
         return wav;
     }
 
-    if (audio_format == 1 && bits_per_sample == 24) {
+    if (audio_format == kWaveFormatPcm && bits_per_sample == 24) {
         if (data.size() % 3 != 0) {
             throw std::runtime_error("malformed PCM24 WAV data chunk");
         }
@@ -244,7 +260,7 @@ WavData read_wav_f32(std::istream & input) {
         return wav;
     }
 
-    if (audio_format == 3 && bits_per_sample == 32) {
+    if (audio_format == kWaveFormatIeeeFloat && bits_per_sample == 32) {
         const size_t sample_count = data.size() / sizeof(float);
         wav.samples.resize(sample_count);
         const auto * pcm = reinterpret_cast<const float *>(data.data());

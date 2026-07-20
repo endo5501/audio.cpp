@@ -260,6 +260,47 @@ void test_extensible_unknown_subformat() {
     require_throws(input, "extensible with unknown SubFormat");
 }
 
+// 32 bits is ambiguous without the GUID: integer PCM32 and IEEE float32 share
+// the layout, and guessing float would reinterpret integer samples as floats -
+// silent garbage instead of an honest failure.
+void test_extensible_truncated_fmt_32bit_is_rejected() {
+    std::string payload;
+    for (int i = 0; i < 4; ++i) {
+        append_le<uint32_t>(payload, static_cast<uint32_t>(1000 * (i + 1)));
+    }
+    const std::string input = build_wav({
+        chunk("fmt ", fmt_body_extensible_truncated(1, 48000, 32)),
+        chunk("data", payload),
+    });
+
+    require_throws(input, "truncated extensible at 32 bits");
+}
+
+// Debris that happens to spell "data" must not truncate audio already read.
+void test_later_data_chunk_does_not_replace_the_first() {
+    const std::string input = build_wav({
+        chunk("fmt ", fmt_body(1u, 1, 16000, 16)),
+        chunk("data", pcm16_payload(kPcm16Samples)),
+        chunk("data", pcm16_payload({7})),
+    });
+
+    const auto wav = engine::audio::read_wav_f32(std::string_view(input));
+    require_pcm16_samples(wav, "first data chunk wins");
+}
+
+void test_later_fmt_chunk_does_not_replace_the_first() {
+    const std::string input = build_wav({
+        chunk("fmt ", fmt_body(1u, 1, 16000, 16)),
+        chunk("data", pcm16_payload(kPcm16Samples)),
+        chunk("fmt ", fmt_body(1u, 2, 44100, 16)),
+    });
+
+    const auto wav = engine::audio::read_wav_f32(std::string_view(input));
+    require(wav.sample_rate == 16000, "first fmt sample rate must win");
+    require(wav.channels == 1, "first fmt channel count must win");
+    require_pcm16_samples(wav, "first fmt wins");
+}
+
 // --- 1.6 Padding chunks around fmt -----------------------------------------
 void test_junk_and_filler_chunks() {
     const std::string input = build_wav({
@@ -365,6 +406,12 @@ int run_all() {
         {"extensible_pcm16", test_extensible_pcm16},
         {"extensible_float32", test_extensible_float32},
         {"extensible_truncated_fmt", test_extensible_truncated_fmt},
+        {"extensible_truncated_fmt_32bit_is_rejected",
+         test_extensible_truncated_fmt_32bit_is_rejected},
+        {"later_data_chunk_does_not_replace_the_first",
+         test_later_data_chunk_does_not_replace_the_first},
+        {"later_fmt_chunk_does_not_replace_the_first",
+         test_later_fmt_chunk_does_not_replace_the_first},
         {"extensible_unknown_subformat", test_extensible_unknown_subformat},
         {"junk_and_filler_chunks", test_junk_and_filler_chunks},
         {"trailing_garbage_after_data", test_trailing_garbage_after_data},
