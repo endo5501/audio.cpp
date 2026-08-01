@@ -251,7 +251,12 @@ core::TensorValue view_batch_matrix(
 bool is_conv_transpose1d_col2im_fast_path_eligible(
     const core::ModuleBuildContext & ctx,
     const ConvTranspose1dConfig & config) noexcept {
-    return ctx.backend_type == core::BackendType::Cuda && config.dilation == 1;
+    // Upstream also lists BackendType::Hip here. This fork branched before HIP
+    // support landed and its BackendType has no Hip member, so naming it would
+    // not compile. Nothing is lost: these builds are Vulkan and Metal only.
+    return (ctx.backend_type == core::BackendType::Cuda ||
+            ctx.backend_type == core::BackendType::Metal) &&
+           config.dilation == 1;
 }
 
 Conv1dModule::Conv1dModule(Conv1dConfig config) : config_(config) {
