@@ -12,7 +12,10 @@
 #include <ggml-backend.h>
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace engine::core {
@@ -76,12 +79,49 @@ core::TensorValue build_irodori_codec_encode(
     core::ModuleBuildContext &ctx, const core::TensorValue &waveform_bct,
     const IrodoriCodecWeights &weights, const IrodoriCodecConfig &config);
 
+// デコーダの受容野 (片側, latent フレーム数)。decoder_input の Conv1d(k7) が 3、
+// block1 の ConvTranspose が 1、block1 の residual 3 本 (dilation 1/3/9) が
+// 39/12 = 3.25、以降のブロックは合計 0.5 未満で、合わせて 7.73 になる。
+// タイル分割の一致はオーバーラップがこの値以上であることに依存する。
+inline constexpr int64_t kIrodoriCodecDecodeReceptiveFieldFrames = 8;
+
+// バックエンド別の既定タイルサイズ。Vulkan は一部ドライバ (AMD) が単一バッファを
+// 2 GiB に制限するため小さく取る。CUDA / CPU には上限が無く、Metal は超過分を
+// ビュー分割で吸収するため、より大きなタイルを安全に使える。
+int64_t
+irodori_codec_default_decode_tile_frames(core::BackendType backend_type) noexcept;
+
+// タイル設定の妥当性を検証する。不正なら std::runtime_error を送出する。
+void validate_irodori_codec_decode_tiling(int64_t tile_frames,
+                                          int64_t overlap_frames);
+
+// decode_window(win_start, win_frames) は latent の当該範囲を復号し、
+// win_frames * upsample サンプルを返さなければならない。
+using IrodoriCodecDecodeWindowFn =
+    std::function<std::vector<float>(int64_t win_start, int64_t win_frames)>;
+
+// latent フレーム軸をオーバーラップ付きタイルに分割して復号し、各タイルの
+// オーバーラップ領域をトリムして連結する。frames <= tile_frames の場合は
+// 分割せず decode_window を 1 回だけ呼ぶ。
+// どの窓も tile_frames フレームを超えないため、計算グラフの単一テンソルサイズは
+// 発話長ではなくタイルサイズによって決まる。
+std::vector<float> irodori_codec_tiled_decode(
+    int64_t frames, int64_t tile_frames, int64_t overlap_frames,
+    int64_t upsample, const IrodoriCodecDecodeWindowFn &decode_window);
+
+// デコードのタイル設定。tile_frames が未指定ならバックエンド既定を使う。
+struct IrodoriCodecDecodeTiling {
+  std::optional<int64_t> tile_frames;
+  int64_t overlap_frames = 16;
+};
+
 class IrodoriCodec {
 public:
   IrodoriCodec(std::shared_ptr<const IrodoriTTSAssets> assets,
                core::ExecutionContext &execution_context,
                size_t graph_arena_bytes, size_t weight_context_bytes,
-               assets::TensorStorageType weight_storage_type);
+               assets::TensorStorageType weight_storage_type,
+               IrodoriCodecDecodeTiling decode_tiling = {});
   ~IrodoriCodec();
 
   runtime::AudioBuffer decode(const std::vector<float> &latent,

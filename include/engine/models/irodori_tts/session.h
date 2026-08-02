@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -77,6 +78,10 @@ private:
   size_t condition_weight_context_bytes_ = 512ull * 1024ull * 1024ull;
   size_t rf_weight_context_bytes_ = 768ull * 1024ull * 1024ull;
   size_t codec_weight_context_bytes_ = 512ull * 1024ull * 1024ull;
+  // codec デコードのタイル設定。tile は未指定ならバックエンド既定
+  // (Vulkan 256 / それ以外 512) を IrodoriCodec 側で解決する。
+  std::optional<int64_t> codec_decode_tile_frames_;
+  int64_t codec_decode_overlap_frames_ = 16;
   assets::TensorStorageType weight_storage_type_ =
       assets::TensorStorageType::Native;
   assets::TensorStorageType codec_weight_storage_type_ =

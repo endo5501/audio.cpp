@@ -289,6 +289,12 @@ IrodoriTTSSession::IrodoriTTSSession(
   codec_weight_context_bytes_ = runtime::parse_size_mb_option(
       options.options, {"irodori_tts.codec_weight_context_mb"},
       codec_weight_context_bytes_);
+  codec_decode_tile_frames_ = runtime::parse_i64_option(
+      options.options, {"irodori_tts.codec_decode_tile_frames"});
+  codec_decode_overlap_frames_ =
+      runtime::parse_i64_option(options.options,
+                                {"irodori_tts.codec_decode_overlap_frames"})
+          .value_or(codec_decode_overlap_frames_);
   if (const auto it = options.options.find("irodori_tts.weight_type");
       it != options.options.end()) {
     weight_storage_type_ = assets::parse_tensor_storage_type(it->second);
@@ -321,7 +327,9 @@ IrodoriTTSSession::IrodoriTTSSession(
       rf_weight_context_bytes_, weight_storage_type_, mem_saver_);
   codec_ = std::make_unique<IrodoriCodec>(
       assets_, execution_context(), codec_graph_arena_bytes_,
-      codec_weight_context_bytes_, codec_weight_storage_type_);
+      codec_weight_context_bytes_, codec_weight_storage_type_,
+      IrodoriCodecDecodeTiling{codec_decode_tile_frames_,
+                               codec_decode_overlap_frames_});
   assets_->model_weights->release_storage();
   assets_->codec_weights->release_storage();
   debug::trace_log_scalar("irodori_tts.model_root",

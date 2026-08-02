@@ -6,9 +6,13 @@
 #include "engine/framework/modules/primitive_modules.h"
 #include "engine/framework/modules/structural_modules.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace engine::models::irodori_tts {
@@ -569,12 +573,97 @@ void normalize_reference_audio_in_place(std::vector<float> &mono,
 
 } // namespace
 
+int64_t irodori_codec_default_decode_tile_frames(
+    core::BackendType backend_type) noexcept {
+  return backend_type == core::BackendType::Vulkan ? 256 : 512;
+}
+
+void validate_irodori_codec_decode_tiling(int64_t tile_frames,
+                                          int64_t overlap_frames) {
+  if (tile_frames <= 0) {
+    throw std::runtime_error(
+        "Irodori-TTS codec decode tile frames must be positive");
+  }
+  if (overlap_frames < kIrodoriCodecDecodeReceptiveFieldFrames) {
+    throw std::runtime_error(
+        "Irodori-TTS codec decode overlap frames must be at least " +
+        std::to_string(kIrodoriCodecDecodeReceptiveFieldFrames) +
+        " (the decoder receptive field); smaller values break tile parity");
+  }
+  if (overlap_frames * 2 >= tile_frames) {
+    throw std::runtime_error("Irodori-TTS codec decode tile frames must exceed "
+                             "twice the overlap frames");
+  }
+}
+
+std::vector<float>
+irodori_codec_tiled_decode(int64_t frames, int64_t tile_frames,
+                           int64_t overlap_frames, int64_t upsample,
+                           const IrodoriCodecDecodeWindowFn &decode_window) {
+  if (frames <= 0) {
+    throw std::runtime_error(
+        "Irodori-TTS codec decode requires a positive latent frame count");
+  }
+  if (upsample <= 0) {
+    throw std::runtime_error(
+        "Irodori-TTS codec decode requires a positive upsample factor");
+  }
+  if (!decode_window) {
+    throw std::runtime_error(
+        "Irodori-TTS codec decode requires a window decoder");
+  }
+
+  auto decode_checked = [&](int64_t win_start, int64_t win_frames) {
+    auto samples = decode_window(win_start, win_frames);
+    if (static_cast<int64_t>(samples.size()) != win_frames * upsample) {
+      throw std::runtime_error(
+          "Irodori-TTS codec decode window produced an unexpected sample count");
+    }
+    return samples;
+  };
+
+  if (frames <= tile_frames) {
+    return decode_checked(0, frames);
+  }
+
+  validate_irodori_codec_decode_tiling(tile_frames, overlap_frames);
+  const int64_t stride = tile_frames - 2 * overlap_frames;
+
+  std::vector<float> stitched;
+  stitched.reserve(static_cast<size_t>(frames * upsample));
+  for (int64_t core_start = 0; core_start < frames; core_start += stride) {
+    const int64_t core_end = std::min(core_start + stride, frames);
+    const int64_t win_start = std::max<int64_t>(0, core_start - overlap_frames);
+    const int64_t win_end = std::min(frames, core_end + overlap_frames);
+    const auto decoded = decode_checked(win_start, win_end - win_start);
+    // 境界のゼロパディングが影響する範囲はオーバーラップに収まっているので、
+    // core 領域だけを残せばフル復号と一致する。
+    const int64_t emit_start = (core_start - win_start) * upsample;
+    const int64_t emit_end =
+        static_cast<int64_t>(decoded.size()) - (win_end - core_end) * upsample;
+    if (emit_start < 0 || emit_end < emit_start ||
+        emit_end > static_cast<int64_t>(decoded.size())) {
+      throw std::runtime_error(
+          "Irodori-TTS codec tiled decode trim range is invalid");
+    }
+    stitched.insert(stitched.end(),
+                    decoded.begin() + static_cast<std::ptrdiff_t>(emit_start),
+                    decoded.begin() + static_cast<std::ptrdiff_t>(emit_end));
+  }
+  if (static_cast<int64_t>(stitched.size()) != frames * upsample) {
+    throw std::runtime_error(
+        "Irodori-TTS codec tiled decode produced an unexpected sample count");
+  }
+  return stitched;
+}
+
 class IrodoriCodec::Impl {
 public:
   Impl(std::shared_ptr<const IrodoriTTSAssets> assets,
        core::ExecutionContext &execution_context, size_t graph_arena_bytes,
        size_t weight_context_bytes,
-       assets::TensorStorageType weight_storage_type)
+       assets::TensorStorageType weight_storage_type,
+       IrodoriCodecDecodeTiling decode_tiling)
       : assets_(std::move(assets)),
         weights_(load_irodori_codec_weights(
             *assets_, execution_context.backend(),
@@ -588,19 +677,55 @@ public:
       throw std::runtime_error(
           "Irodori-TTS codec graph runner requires assets");
     }
+    decode_tile_frames_ = decode_tiling.tile_frames.value_or(
+        irodori_codec_default_decode_tile_frames(backend_type_));
+    decode_overlap_frames_ = decode_tiling.overlap_frames;
+    validate_irodori_codec_decode_tiling(decode_tile_frames_,
+                                         decode_overlap_frames_);
   }
 
   runtime::AudioBuffer decode(const std::vector<float> &latent,
                               int64_t latent_steps, int64_t target_samples) {
-    const bool graph_rebuild =
-        graph_ == nullptr || graph_->latent_steps() != latent_steps;
-    if (graph_rebuild) {
-      graph_.reset();
-      graph_ = std::make_unique<Graph>(*this, latent_steps, graph_arena_bytes_);
+    const int64_t latent_dim = assets_->config.latent_dim;
+    if (static_cast<int64_t>(latent.size()) != latent_steps * latent_dim) {
+      throw std::runtime_error("Irodori-TTS codec latent size mismatch");
     }
+    int64_t graph_rebuilds = 0;
+    int64_t tile_count = 0;
+    auto samples = irodori_codec_tiled_decode(
+        latent_steps, decode_tile_frames_, decode_overlap_frames_,
+        assets_->codec.hop_length,
+        [&](int64_t win_start, int64_t win_frames) {
+          ++tile_count;
+          if (graph_ == nullptr || graph_->latent_steps() != win_frames) {
+            graph_.reset();
+            graph_ =
+                std::make_unique<Graph>(*this, win_frames, graph_arena_bytes_);
+            ++graph_rebuilds;
+          }
+          const auto begin = latent.begin() +
+                             static_cast<std::ptrdiff_t>(win_start * latent_dim);
+          return graph_->run(std::vector<float>(
+              begin,
+              begin + static_cast<std::ptrdiff_t>(win_frames * latent_dim)));
+        });
+    debug::trace_log_scalar("irodori_tts.codec_decode.tile_frames",
+                            decode_tile_frames_);
+    debug::trace_log_scalar("irodori_tts.codec_decode.overlap_frames",
+                            decode_overlap_frames_);
+    debug::trace_log_scalar("irodori_tts.codec_decode.tile_count", tile_count);
     debug::trace_log_scalar("irodori_tts.codec_decode.graph_rebuild",
-                             graph_rebuild);
-    return graph_->run(latent, target_samples);
+                            graph_rebuilds);
+    // タイル連結後に一度だけ末尾を切り詰める。
+    if (target_samples > 0 &&
+        static_cast<int64_t>(samples.size()) > target_samples) {
+      samples.resize(static_cast<size_t>(target_samples));
+    }
+    return runtime::AudioBuffer{
+        assets_->codec.sample_rate,
+        1,
+        std::move(samples),
+    };
   }
 
   std::vector<float> encode_reference(const runtime::AudioBuffer &audio,
@@ -751,8 +876,10 @@ private:
 
     int64_t latent_steps() const noexcept { return latent_steps_; }
 
-    runtime::AudioBuffer run(const std::vector<float> &latent,
-                             int64_t target_samples) {
+    // このグラフが担当する latent 窓を復号し、latent_steps * hop_length
+    // サンプルをそのまま返す。末尾の切り詰めは Impl::decode() がタイル連結後に
+    // 一度だけ行う。
+    std::vector<float> run(const std::vector<float> &latent) {
       const auto &config = owner_->assets_->config;
       if (static_cast<int64_t>(latent.size()) !=
           latent_steps_ * config.latent_dim) {
@@ -766,16 +893,7 @@ private:
       if (status != GGML_STATUS_SUCCESS) {
         throw std::runtime_error("Irodori-TTS codec graph compute failed");
       }
-      auto samples = core::read_tensor_f32(output_.tensor);
-      if (target_samples > 0 &&
-          static_cast<int64_t>(samples.size()) > target_samples) {
-        samples.resize(static_cast<size_t>(target_samples));
-      }
-      return runtime::AudioBuffer{
-          owner_->assets_->codec.sample_rate,
-          1,
-          std::move(samples),
-      };
+      return core::read_tensor_f32(output_.tensor);
     }
 
   private:
@@ -794,6 +912,8 @@ private:
   core::BackendType backend_type_ = core::BackendType::Cpu;
   int threads_ = 1;
   size_t graph_arena_bytes_ = 0;
+  int64_t decode_tile_frames_ = 0;
+  int64_t decode_overlap_frames_ = 0;
   std::unique_ptr<Graph> graph_;
   std::unique_ptr<EncodeGraph> encode_graph_;
 };
@@ -802,10 +922,12 @@ IrodoriCodec::IrodoriCodec(std::shared_ptr<const IrodoriTTSAssets> assets,
                            core::ExecutionContext &execution_context,
                            size_t graph_arena_bytes,
                            size_t weight_context_bytes,
-                           assets::TensorStorageType weight_storage_type)
+                           assets::TensorStorageType weight_storage_type,
+                           IrodoriCodecDecodeTiling decode_tiling)
     : impl_(std::make_unique<Impl>(std::move(assets), execution_context,
                                    graph_arena_bytes, weight_context_bytes,
-                                   weight_storage_type)) {}
+                                   weight_storage_type,
+                                   std::move(decode_tiling))) {}
 
 IrodoriCodec::~IrodoriCodec() = default;
 
