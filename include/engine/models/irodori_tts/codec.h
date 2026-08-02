@@ -107,6 +107,12 @@ inline constexpr int64_t kIrodoriCodecDecodeReceptiveFieldFrames = 8;
 int64_t
 irodori_codec_default_decode_tile_frames(core::BackendType backend_type) noexcept;
 
+// 実効タイルサイズを決める。明示指定があればバックエンドに関わらずそれを優先し、
+// 未指定ならバックエンド既定に落とす。
+int64_t irodori_codec_resolve_decode_tile_frames(
+    std::optional<int64_t> requested_tile_frames,
+    core::BackendType backend_type) noexcept;
+
 // タイル設定の妥当性を検証する。不正なら std::runtime_error を送出する。
 void validate_irodori_codec_decode_tiling(int64_t tile_frames,
                                           int64_t overlap_frames);

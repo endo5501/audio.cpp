@@ -588,6 +588,13 @@ int64_t irodori_codec_default_decode_tile_frames(
   return backend_type == core::BackendType::Vulkan ? 256 : 512;
 }
 
+int64_t irodori_codec_resolve_decode_tile_frames(
+    std::optional<int64_t> requested_tile_frames,
+    core::BackendType backend_type) noexcept {
+  return requested_tile_frames.value_or(
+      irodori_codec_default_decode_tile_frames(backend_type));
+}
+
 void validate_irodori_codec_decode_tiling(int64_t tile_frames,
                                           int64_t overlap_frames) {
   if (tile_frames <= 0) {
@@ -686,8 +693,8 @@ public:
         backend_type_(execution_context.backend_type()),
         threads_(std::max(1, execution_context.config().threads)),
         graph_arena_bytes_(graph_arena_bytes) {
-    decode_tile_frames_ = decode_tiling.tile_frames.value_or(
-        irodori_codec_default_decode_tile_frames(backend_type_));
+    decode_tile_frames_ = irodori_codec_resolve_decode_tile_frames(
+        decode_tiling.tile_frames, backend_type_);
     decode_overlap_frames_ = decode_tiling.overlap_frames;
     validate_irodori_codec_decode_tiling(decode_tile_frames_,
                                          decode_overlap_frames_);

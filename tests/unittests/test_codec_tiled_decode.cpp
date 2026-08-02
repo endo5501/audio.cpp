@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -207,6 +208,30 @@ void test_default_tile_frames() {
     require_eq(ir::irodori_codec_default_decode_tile_frames(core::BackendType::Cpu),
                static_cast<int64_t>(512), "CPU default tile");
     std::cout << "[ok] backend-specific default tile sizes\n";
+}
+
+void test_resolve_tile_frames() {
+    // 未指定ならバックエンド既定に落ちる。
+    require_eq(ir::irodori_codec_resolve_decode_tile_frames(std::nullopt,
+                                                            core::BackendType::Vulkan),
+               static_cast<int64_t>(256), "Vulkan resolves to its default");
+    require_eq(ir::irodori_codec_resolve_decode_tile_frames(std::nullopt,
+                                                            core::BackendType::Metal),
+               static_cast<int64_t>(512), "Metal resolves to its default");
+    require_eq(ir::irodori_codec_resolve_decode_tile_frames(std::nullopt,
+                                                            core::BackendType::Cpu),
+               static_cast<int64_t>(512), "CPU resolves to its default");
+
+    // 明示指定はバックエンドに関わらず優先される。既定より小さくても大きくてもよい。
+    require_eq(ir::irodori_codec_resolve_decode_tile_frames(128, core::BackendType::Vulkan),
+               static_cast<int64_t>(128), "explicit tile overrides the Vulkan default");
+    require_eq(ir::irodori_codec_resolve_decode_tile_frames(128, core::BackendType::Metal),
+               static_cast<int64_t>(128), "explicit tile overrides the Metal default");
+    require_eq(ir::irodori_codec_resolve_decode_tile_frames(1024, core::BackendType::Cpu),
+               static_cast<int64_t>(1024), "explicit tile larger than the default is honoured");
+    require_eq(ir::irodori_codec_resolve_decode_tile_frames(256, core::BackendType::Cuda),
+               static_cast<int64_t>(256), "explicit tile equal to another backend's default");
+    std::cout << "[ok] explicit tile size overrides the backend default\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +492,7 @@ void test_tiled_matches_direct_real_decoder() {
 int main() {
     try {
         test_default_tile_frames();
+        test_resolve_tile_frames();
         test_tiling_validation();
         test_tiled_decode_index_math();
         test_tiled_matches_direct_real_decoder();
