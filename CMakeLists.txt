@@ -899,6 +899,14 @@ if (ENGINE_BUILD_TESTS)
         COMMAND conv_transpose_fast_path_test
     )
 
+    add_engine_unittest(codec_tiled_decode_test tests/unittests/test_codec_tiled_decode.cpp)
+    target_include_directories(codec_tiled_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unittests)
+
+    add_test(
+        NAME codec_tiled_decode_test
+        COMMAND codec_tiled_decode_test
+    )
+
     add_engine_unittest(supertonic_vector_convnext_exp_test tests/unittests/test_supertonic_vector_convnext_exp.cpp)
 
     add_test(
