@@ -429,6 +429,16 @@ struct GgmlContextDeleter {
   }
 };
 
+// メンバ初期化子で *assets_ を使う前に検査する。コンストラクタ本体のガードでは
+// weights_ の初期化が先に走ってしまい、null 時に未定義動作になる。
+std::shared_ptr<const IrodoriTTSAssets>
+require_codec_assets(std::shared_ptr<const IrodoriTTSAssets> assets) {
+  if (assets == nullptr) {
+    throw std::runtime_error("Irodori-TTS codec graph runner requires assets");
+  }
+  return assets;
+}
+
 std::vector<float> reflect_pad_right_to_multiple(std::vector<float> samples,
                                                  int64_t multiple) {
   if (samples.empty() || multiple <= 0) {
@@ -612,6 +622,10 @@ irodori_codec_tiled_decode(int64_t frames, int64_t tile_frames,
     throw std::runtime_error(
         "Irodori-TTS codec decode requires a window decoder");
   }
+  // frames に関係なく検査する。ここを分割経路の中に置くと、同じ設定が短い発話では
+  // 通り長い発話でだけ落ちることになり、設定エラーの発覚が最悪のタイミングまで
+  // 遅れる。
+  validate_irodori_codec_decode_tiling(tile_frames, overlap_frames);
 
   auto decode_checked = [&](int64_t win_start, int64_t win_frames) {
     auto samples = decode_window(win_start, win_frames);
@@ -626,7 +640,6 @@ irodori_codec_tiled_decode(int64_t frames, int64_t tile_frames,
     return decode_checked(0, frames);
   }
 
-  validate_irodori_codec_decode_tiling(tile_frames, overlap_frames);
   const int64_t stride = tile_frames - 2 * overlap_frames;
 
   std::vector<float> stitched;
@@ -664,7 +677,7 @@ public:
        size_t weight_context_bytes,
        assets::TensorStorageType weight_storage_type,
        IrodoriCodecDecodeTiling decode_tiling)
-      : assets_(std::move(assets)),
+      : assets_(require_codec_assets(std::move(assets))),
         weights_(load_irodori_codec_weights(
             *assets_, execution_context.backend(),
             execution_context.backend_type(), weight_context_bytes,
@@ -673,10 +686,6 @@ public:
         backend_type_(execution_context.backend_type()),
         threads_(std::max(1, execution_context.config().threads)),
         graph_arena_bytes_(graph_arena_bytes) {
-    if (assets_ == nullptr) {
-      throw std::runtime_error(
-          "Irodori-TTS codec graph runner requires assets");
-    }
     decode_tile_frames_ = decode_tiling.tile_frames.value_or(
         irodori_codec_default_decode_tile_frames(backend_type_));
     decode_overlap_frames_ = decode_tiling.overlap_frames;

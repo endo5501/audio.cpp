@@ -61,6 +61,8 @@ runtime::ModelCliInterface cli(const IrodoriTTSAssets &) {
         {"irodori_tts.condition_weight_context_mb", "n", "Condition encoder weight context size."},
         {"irodori_tts.rf_weight_context_mb", "n", "RF sampler weight context size."},
         {"irodori_tts.codec_weight_context_mb", "n", "DACVAE codec weight context size."},
+        {"irodori_tts.codec_decode_tile_frames", "n", "DACVAE decode tile size in latent frames; default 256 on Vulkan, 512 elsewhere."},
+        {"irodori_tts.codec_decode_overlap_frames", "n", "DACVAE decode tile overlap in latent frames; default 16, minimum 8."},
         {"irodori_tts.mem_saver", "true|false", "Release staged runtime graphs after request phases; default true."},
         {"irodori_tts.reference_cache_slots", "n", "Prepared reference-speaker cache slots; default 1."},
     };

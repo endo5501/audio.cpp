@@ -79,10 +79,26 @@ core::TensorValue build_irodori_codec_encode(
     core::ModuleBuildContext &ctx, const core::TensorValue &waveform_bct,
     const IrodoriCodecWeights &weights, const IrodoriCodecConfig &config);
 
-// デコーダの受容野 (片側, latent フレーム数)。decoder_input の Conv1d(k7) が 3、
-// block1 の ConvTranspose が 1、block1 の residual 3 本 (dilation 1/3/9) が
-// 39/12 = 3.25、以降のブロックは合計 0.5 未満で、合わせて 7.73 になる。
-// タイル分割の一致はオーバーラップがこの値以上であることに依存する。
+// デコーダの受容野 (片側, latent フレーム数)。
+//
+// 出力インデックスを層ごとに逆伝播して求める。窓を [0, N)、左のトリム量を ov と
+// すると、残す先頭サンプルは 1920*ov。ConvTranspose は kernel=2s / stride=s /
+// 両端 p=(s+1)/2 の切り落としなので、出力 j は入力 floor((j+p)/s)-1 以上を必要とする。
+//
+//   watermark Conv1d(k7,p3)      1920ov - 3
+//   block4 residual (d=1/3/9)    1920ov - 42        (3+9+27=39)
+//   block4 ConvT (s2,p1)         960ov - 22
+//   block3 residual              960ov - 61
+//   block3 ConvT (s8,p4)         120ov - 9
+//   block2 residual              120ov - 48
+//   block2 ConvT (s10,p5)        12ov - 6
+//   block1 residual              12ov - 45
+//   block1 ConvT (s12,p6)        ov - 5
+//   decoder_input Conv1d(k7,p3)  ov - 8
+//
+// これが 0 以上であること、すなわち **ov >= 8**。右端も同様に (N-ov)+7 <= N-1 から
+// 同じ条件になる。等号成立で余裕は無く、ov=7 ではビット一致が崩れる (実測 1 ULP)。
+// この値は test_codec_tiled_decode.cpp の parity ケースで固定してある。
 inline constexpr int64_t kIrodoriCodecDecodeReceptiveFieldFrames = 8;
 
 // バックエンド別の既定タイルサイズ。Vulkan は一部ドライバ (AMD) が単一バッファを

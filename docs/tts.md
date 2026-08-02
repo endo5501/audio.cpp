@@ -491,6 +491,8 @@ audiocpp_cli --task clon --family irodori_tts --model /path/to/Irodori-TTS-500M-
 | `--session-option irodori_tts.condition_weight_context_mb=<n>` | MB | `512` | Condition encoder weight context size. |
 | `--session-option irodori_tts.rf_weight_context_mb=<n>` | MB | `768` | RF sampler weight context size. |
 | `--session-option irodori_tts.codec_weight_context_mb=<n>` | MB | `512` | DACVAE codec weight context size. |
+| `--session-option irodori_tts.codec_decode_tile_frames=<n>` | latent frames | `256` (Vulkan) / `512` (Metal, CUDA, CPU) | DACVAE decode tile size. Latents longer than this are decoded in overlapping tiles so that graph memory stays bounded by the tile rather than the utterance length. The Vulkan default is smaller because some drivers cap a single buffer at 2 GiB. |
+| `--session-option irodori_tts.codec_decode_overlap_frames=<n>` | latent frames | `16` | DACVAE decode tile overlap. Must be at least 8, the decoder receptive field; at or above that the tiled output is bit-identical to an unsplit decode. |
 
 ## Supertonic
 

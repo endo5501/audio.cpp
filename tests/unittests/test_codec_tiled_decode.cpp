@@ -155,6 +155,20 @@ bool throws_runtime_error(int64_t tile_frames, int64_t overlap_frames) {
     return false;
 }
 
+// irodori_codec_tiled_decode 自体が設定を検査するかどうか。
+bool tiled_decode_throws(int64_t frames, int64_t tile_frames, int64_t overlap_frames) {
+    try {
+        ir::irodori_codec_tiled_decode(
+            frames, tile_frames, overlap_frames, 8,
+            [](int64_t, int64_t win_frames) {
+                return std::vector<float>(static_cast<size_t>(win_frames * 8), 0.0f);
+            });
+    } catch (const std::runtime_error &) {
+        return true;
+    }
+    return false;
+}
+
 void test_tiling_validation() {
     require(throws_runtime_error(32, 16), "overlap*2 == tile must be rejected");
     require(throws_runtime_error(32, 20), "overlap*2 > tile must be rejected");
@@ -164,6 +178,18 @@ void test_tiling_validation() {
     require(!throws_runtime_error(256, 16), "the documented default must be accepted");
     require(!throws_runtime_error(512, 16), "the Metal default must be accepted");
     require(!throws_runtime_error(32, 8), "overlap equal to the receptive field must be accepted");
+
+    // 設定の妥当性は frames に依存してはならない。frames <= tile の直接経路でも
+    // 検査されなければ、「短い発話では通り、長い発話で初めて落ちる」設定エラーを
+    // 作り込むことになる。
+    require(tiled_decode_throws(300, 256, 0),
+            "invalid overlap must be rejected when tiling");
+    require(tiled_decode_throws(200, 256, 0),
+            "invalid overlap must be rejected on the direct path too");
+    require(tiled_decode_throws(200, 256, 7),
+            "overlap below the receptive field must be rejected on the direct path too");
+    require(!tiled_decode_throws(200, 256, 16),
+            "a valid configuration must not be rejected on the direct path");
     std::cout << "[ok] tiling configuration validation\n";
 }
 
@@ -353,8 +379,6 @@ void test_tiled_matches_direct_real_decoder() {
     config.sample_rate = 48000;
 
     constexpr int64_t kFrames = 100;
-    constexpr int64_t kTile = 48;
-    constexpr int64_t kOverlap = 16;
 
     core::BackendConfig backend_config{core::BackendType::Cpu, 0, 4};
     ggml_backend_t backend = core::init_backend(backend_config);
@@ -366,14 +390,6 @@ void test_tiled_matches_direct_real_decoder() {
             static_cast<size_t>(kFrames * config.codebook_dim), 0.29f, 1.0f);
 
         const auto direct = codec.decode_window(latent, 0, kFrames);
-        const auto tiled = ir::irodori_codec_tiled_decode(
-            kFrames, kTile, kOverlap, kUpsampleFactor,
-            [&](int64_t win_start, int64_t win_frames) {
-                return codec.decode_window(latent, win_start, win_frames);
-            });
-
-        require_eq(static_cast<int64_t>(tiled.size()), static_cast<int64_t>(direct.size()),
-                   "tiled vs direct sample count");
 
         // 出力は最後に tanh を通るので飽和しうる。全部 +-1 に張り付いていると
         // 一致テストが自明に通ってしまうため、有意な信号であることを確かめる。
@@ -386,29 +402,59 @@ void test_tiled_matches_direct_real_decoder() {
         require(unsaturated * 10 > static_cast<int64_t>(direct.size()),
                 "direct decode output is saturated; the parity check would be vacuous");
 
-        float max_diff = 0.0f;
-        int64_t worst_index = -1;
-        for (size_t i = 0; i < direct.size(); ++i) {
-            const float diff = std::fabs(direct[i] - tiled[i]);
-            if (diff > max_diff) {
-                max_diff = diff;
-                worst_index = static_cast<int64_t>(i);
-            }
-        }
-        if (max_diff > 1e-4f) {
-            std::ostringstream oss;
-            oss << "tiled decode differs from direct decode: max_diff=" << max_diff
-                << " at sample " << worst_index
-                << " (direct=" << direct[static_cast<size_t>(worst_index)]
-                << " tiled=" << tiled[static_cast<size_t>(worst_index)] << ')';
-            throw std::runtime_error(oss.str());
-        }
+        struct ParityCase {
+            int64_t tile;
+            int64_t overlap;
+            const char * note;
+        };
+        // 2 件目はオーバーラップを受容野ちょうどに置く。この境界に余裕は無い:
+        // オーバーラップを 7 に下げると max_diff が 0 から 5.96e-08 (1 ULP) に
+        // 変わることを実測で確認している。デコーダの構造が変わって受容野が 9 以上に
+        // なれば、ここが最初に壊れる。定数をコメントではなくテストで固定するのが狙い。
+        const ParityCase cases[] = {
+            {48, 16, "default-like overlap"},
+            {32, ir::kIrodoriCodecDecodeReceptiveFieldFrames, "overlap == receptive field"},
+        };
 
-        std::cout << "[ok] tiled decode matches direct decode on the real decoder structure"
-                  << " frames=" << kFrames << " tile=" << kTile << " overlap=" << kOverlap
-                  << " samples=" << direct.size()
-                  << " unsaturated=" << unsaturated
-                  << " max_diff=" << max_diff << '\n';
+        for (const auto & parity : cases) {
+            const auto tiled = ir::irodori_codec_tiled_decode(
+                kFrames, parity.tile, parity.overlap, kUpsampleFactor,
+                [&](int64_t win_start, int64_t win_frames) {
+                    return codec.decode_window(latent, win_start, win_frames);
+                });
+
+            require_eq(static_cast<int64_t>(tiled.size()), static_cast<int64_t>(direct.size()),
+                       "tiled vs direct sample count");
+
+            // 許容誤差は置かない。オーバーラップが受容野以上なら、各出力サンプルは
+            // 分割の有無に関わらず同じ入力に同じ順序で同じ演算を適用した結果になり、
+            // ビット単位で一致する。1 ULP でも許すと、受容野が不足したときの
+            // 破綻 (実測 5.96e-08) を見逃す。
+            float max_diff = 0.0f;
+            int64_t worst_index = -1;
+            for (size_t i = 0; i < direct.size(); ++i) {
+                const float diff = std::fabs(direct[i] - tiled[i]);
+                if (diff > max_diff) {
+                    max_diff = diff;
+                    worst_index = static_cast<int64_t>(i);
+                }
+            }
+            if (max_diff != 0.0f) {
+                std::ostringstream oss;
+                oss << "tiled decode is not bit-exact vs direct decode (" << parity.note
+                    << ", tile=" << parity.tile << " overlap=" << parity.overlap
+                    << "): max_diff=" << max_diff << " at sample " << worst_index
+                    << " (direct=" << direct[static_cast<size_t>(worst_index)]
+                    << " tiled=" << tiled[static_cast<size_t>(worst_index)] << ')';
+                throw std::runtime_error(oss.str());
+            }
+
+            std::cout << "[ok] tiled decode is bit-exact vs direct decode on the real decoder"
+                      << " frames=" << kFrames << " tile=" << parity.tile
+                      << " overlap=" << parity.overlap << " (" << parity.note << ')'
+                      << " samples=" << direct.size()
+                      << " unsaturated=" << unsaturated << '\n';
+        }
     } catch (...) {
         ggml_backend_free(backend);
         throw;
