@@ -1,5 +1,5 @@
 #include "engine/framework/assets/tensor_source.h"
-#include "engine/framework/assets/model_package.h"
+#include "engine/framework/model_spec/package.h"
 #include "engine/framework/core/backend.h"
 #include "engine/framework/core/backend_weight_store.h"
 #include "engine/framework/io/safetensors.h"
@@ -71,13 +71,13 @@ void test_hviske_standalone_gguf() {
         native / "model.safetensors",
         gguf,
         engine::assets::TensorStorageType::F16);
-    const auto assets = engine::models::hviske_asr::load_hviske_assets(gguf);
+    const auto assets = engine::models::hviske_asr::load_hviske_asr_assets(gguf);
     engine::test::require_eq(assets->config.model_type, std::string("cohere_asr"), "Hviske model type");
     engine::test::require(assets->model_weights->has_tensor("dummy.weight"), "Hviske standalone GGUF weights");
     engine::test::require(!assets->tokenizer_pieces.empty(), "Hviske embedded tokenizer");
 
     std::filesystem::copy_file(gguf, native / "model.gguf");
-    const auto explicitly_native = engine::models::hviske_asr::load_hviske_assets(native / "model.safetensors");
+    const auto explicitly_native = engine::models::hviske_asr::load_hviske_asr_assets(native / "model.safetensors");
     engine::test::require_eq(
         explicitly_native->model_weights->require_metadata("dummy.weight").dtype,
         std::string("F32"),
@@ -105,9 +105,9 @@ void test_citrinet_standalone_gguf() {
         native / "citrinet_256.safetensors",
         gguf,
         engine::assets::TensorStorageType::F16);
-    const auto assets = engine::assets::load_resource_bundle_from_package_spec(
+    const auto assets = engine::model_spec::load_resource_bundle(
         gguf,
-        engine::assets::default_model_package_spec_path("citrinet_asr"));
+        engine::model_spec::default_spec_path("citrinet_asr"));
     engine::test::require_eq(
         assets.require_file("weights"),
         std::filesystem::weakly_canonical(gguf),
@@ -121,9 +121,9 @@ void test_citrinet_standalone_gguf() {
         std::string("citrinet_256_tokenizer.model"),
         "Citrinet embedded tokenizer");
 
-    const auto native_assets = engine::assets::load_resource_bundle_from_package_spec(
+    const auto native_assets = engine::model_spec::load_resource_bundle(
         native / "citrinet_256.safetensors",
-        engine::assets::default_model_package_spec_path("citrinet_asr"));
+        engine::model_spec::default_spec_path("citrinet_asr"));
     engine::test::require_eq(
         native_assets.open_tensor_source("weights")->require_metadata("dummy.weight").dtype,
         std::string("F32"),

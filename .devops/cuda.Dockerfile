@@ -3,11 +3,9 @@
 # Usage:
 #   docker build -f .devops/cuda.Dockerfile -t local/audiocpp:full-cuda .
 
-# ============================================================
-# [BUILD] Compile all release binaries with CUDA
-# ============================================================
+# ── BUILD: Compile all release binaries with CUDA ─────────────────────────────
 ARG UBUNTU_VERSION=24.04
-ARG CUDA_VERSION=12.9.0
+ARG CUDA_VERSION=12.9.2
 ARG BUILD_DATE=N/A
 ARG APP_VERSION=N/A
 ARG APP_REVISION=N/A
@@ -32,39 +30,44 @@ ENV CC=gcc-${GCC_VERSION} CXX=g++-${GCC_VERSION} CUDAHOSTCXX=g++-${GCC_VERSION}
 WORKDIR /app
 COPY . .
 
-# Configure
+# Configure and build
 RUN cmake -S . -B build \
         -DCMAKE_BUILD_TYPE=Release \
+        -DAUDIOCPP_MODEL_SET=full \
+        -DENGINE_ENABLE_CPU_ALL_VARIANTS=ON \
         -DENGINE_ENABLE_CUDA=ON \
         -DENGINE_ENABLE_CUDA_GRAPHS=ON \
         -DENGINE_ENABLE_VULKAN=OFF \
         -DENGINE_ENABLE_OPENMP=ON \
         -DENGINE_BUILD_EXAMPLES=OFF \
         -DENGINE_BUILD_TESTS=OFF \
-        -DENGINE_BUILD_WARMBENCH=OFF && \
+        -DENGINE_BUILD_WARMBENCH=OFF \
+        -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined && \
     cmake --build build --parallel $(nproc) \
         --target audiocpp_cli \
         --target audiocpp_server \
         --target model_perf \
         --target miocodec_wavlm_parity
 
-# Collect all binaries + multiplexer into /app/full
+# Collect shared libraries
+RUN mkdir -p /app/lib && \
+    find build -name "*.so*" -exec cp -P {} /app/lib \;
+
+# Collect binaries + multiplexer into /app/full
 RUN mkdir -p /app/full && \
     cp build/bin/audiocpp_cli build/bin/audiocpp_server \
        build/bin/model_perf build/bin/miocodec_wavlm_parity /app/full/ && \
     cp .devops/entrypoint.sh /app/full/entrypoint.sh && \
     chmod +x /app/full/entrypoint.sh
 
-# ============================================================
-# [BASE] Shared runtime (NVIDIA CUDA + common libs)
-# ============================================================
+# ── BASE: Shared runtime (NVIDIA CUDA + common libs) ──────────────────────────
 FROM ${BASE_CUDA_RUN_CONTAINER} AS base
 
 ARG BUILD_DATE=N/A
 ARG APP_VERSION=N/A
 ARG APP_REVISION=N/A
-ARG IMAGE_URL=https://github.com/0xShug0/audio.cpp
-ARG IMAGE_SOURCE=https://github.com/0xShug0/audio.cpp
+ARG IMAGE_URL=N/A
+ARG IMAGE_SOURCE=N/A
 
 LABEL org.opencontainers.image.created=$BUILD_DATE \
       org.opencontainers.image.version=$APP_VERSION \
@@ -84,19 +87,16 @@ RUN apt-get update && \
     find /var/cache/apt/archives /var/lib/apt/lists -not -name lock -type f -delete && \
     find /var/cache -type f -delete
 
+COPY --from=build /app/lib/ /app
+
 WORKDIR /app
 
-# ============================================================
-# [FULL] All binaries + entrypoint.sh multiplexer
-# ============================================================
+# ── FULL: All binaries + entrypoint.sh multiplexer ────────────────────────────
 FROM base AS full
 
 COPY --from=build /app/full /app
+COPY model_specs/ /app/model_specs/
 
 USER ubuntu
 
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=15s \
-  CMD curl -f http://localhost:8080/health || exit 1
-
 ENTRYPOINT ["/app/entrypoint.sh"]
-

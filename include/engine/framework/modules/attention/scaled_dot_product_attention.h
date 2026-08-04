@@ -11,12 +11,19 @@ namespace engine::modules {
 enum class ScaledDotProductAttentionLowering {
     Explicit,
     Flash,
+    FlashPreserveViews,
+};
+
+enum class AttentionCausality {
+    NonCausal,
+    Causal,
 };
 
 struct ScaledDotProductAttentionConfig {
     int64_t head_dim = 0;
     ScaledDotProductAttentionLowering lowering = ScaledDotProductAttentionLowering::Explicit;
     ggml_prec precision = GGML_PREC_F32;
+    AttentionCausality causality = AttentionCausality::NonCausal;
 };
 
 class ScaledDotProductAttentionModule {

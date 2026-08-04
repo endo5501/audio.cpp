@@ -3,9 +3,11 @@
 #include "multipart.h"
 
 #include "../cli/request.h"
+#include "../streaming/pcm_source.h"
 #include "../streaming/streaming.h"
 
 #include "engine/framework/audio/audio_reader.h"
+#include "engine/framework/debug/trace.h"
 #include "engine/framework/io/json.h"
 #include "engine/framework/runtime/registry.h"
 
@@ -18,9 +20,11 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -80,6 +84,8 @@ const char * backend_name(engine::core::BackendType type) {
             return "cpu";
         case engine::core::BackendType::Cuda:
             return "cuda";
+        case engine::core::BackendType::Hip:
+            return "hip";
         case engine::core::BackendType::Vulkan:
             return "vulkan";
         case engine::core::BackendType::Metal:
@@ -252,6 +258,87 @@ bool is_supported_audio_upload_filename(const std::string & filename) {
     return ext.empty() || engine::audio::is_supported_audio_extension(ext);
 }
 
+std::string lower_ascii(std::string value) {
+    for (char & ch : value) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return value;
+}
+
+std::string_view trim_ascii(std::string_view value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
+bool is_json_content_type(const HttpRequest & request) {
+    const auto it = request.headers.find("content-type");
+    if (it == request.headers.end()) {
+        return false;
+    }
+    const std::string content_type = lower_ascii(it->second);
+    const auto media_type = trim_ascii(std::string_view(content_type).substr(0, content_type.find(';')));
+    return media_type == "application/json" ||
+        (media_type.size() > 5 && media_type.substr(media_type.size() - 5) == "+json");
+}
+
+std::string request_content_type(const HttpRequest & request) {
+    const auto it = request.headers.find("content-type");
+    return it == request.headers.end() ? "" : it->second;
+}
+
+void log_request_body_if_enabled(const ServerConfig & config, const HttpRequest & request) {
+    if (!config.log_request_body || !engine::debug::log_enabled()) {
+        return;
+    }
+    if (request.method != "POST") {
+        return;
+    }
+    if (!request.body.empty() && is_json_content_type(request)) {
+        engine::debug::log_message("[REQUEST_BODY] " + request.method + " " + request.path);
+        engine::debug::log_message(request.body);
+        return;
+    }
+    if (request.body.empty() && request.body_stream == nullptr) {
+        return;
+    }
+    std::ostringstream out;
+    out << "[REQUEST_BODY_SKIPPED] " << request.method << " " << request.path
+        << " content_type=" << json_quote(request_content_type(request));
+    if (request.body_stream != nullptr) {
+        out << " body=stream";
+    } else {
+        out << " body_bytes=" << request.body.size();
+    }
+    if (!request.query.empty()) {
+        out << " query=" << json_quote(request.query);
+    }
+    engine::debug::log_message(out.str());
+}
+
+void log_multipart_request_summary_if_enabled(
+    const ServerConfig & config,
+    const std::vector<MultipartPart> & parts) {
+    if (!config.log_request_body || !engine::debug::log_enabled()) {
+        return;
+    }
+    for (const auto & part : parts) {
+        if (part.filename.empty()) {
+            continue;
+        }
+        std::ostringstream out;
+        out << "[REQUEST_BODY_SKIPPED] multipart_file"
+            << " field=" << json_quote(part.name)
+            << " filename=" << json_quote(part.filename)
+            << " bytes=" << part.data.size();
+        engine::debug::log_message(out.str());
+    }
+}
+
 double elapsed_ms(Clock::time_point started) {
     return std::chrono::duration<double, std::milli>(Clock::now() - started).count();
 }
@@ -376,7 +463,11 @@ std::string task_result_json_with_timing(
             const auto & segment = result.speech_segments[i];
             out << "{\"start_sample\":" << segment.span.start_sample
                 << ",\"end_sample\":" << segment.span.end_sample
-                << ",\"confidence\":" << segment.confidence << "}";
+                << ",\"confidence\":" << segment.confidence;
+            if (!segment.text.empty()) {
+                out << ",\"text\":" << json_quote(segment.text);
+            }
+            out << "}";
         }
         out << "]";
     }
@@ -391,7 +482,11 @@ std::string task_result_json_with_timing(
             out << "{\"start_sample\":" << turn.span.start_sample
                 << ",\"end_sample\":" << turn.span.end_sample
                 << ",\"speaker_id\":" << json_quote(turn.speaker_id)
-                << ",\"confidence\":" << turn.confidence << "}";
+                << ",\"confidence\":" << turn.confidence;
+            if (!turn.text.empty()) {
+                out << ",\"text\":" << json_quote(turn.text);
+            }
+            out << "}";
         }
         out << "]";
     }
@@ -551,40 +646,61 @@ ServerState::ServerState(ServerConfig config, std::filesystem::path request_base
 }
 
 HttpResponse ServerState::handle(const HttpRequest & request) {
+  HttpResponse response;
+  const std::string allowed_origin = get_allowed_origin(request);
   try {
-    if (request.method == "GET" && request.path == "/health") {
-        return json_response(
+    log_request_body_if_enabled(config_, request);
+    if (request.method == "OPTIONS" && !allowed_origin.empty()) {
+        response.status = 204;
+        response.content_type = "text/plain";
+        response.headers["Access-Control-Allow-Headers"] = "*";
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST";
+    }
+    else if (request.method == "GET" && request.path == "/health") {
+        response = json_response(
             "{\"status\":\"ok\",\"backend\":\"" +
             std::string(backend_name(config_.backend)) +
             "\",\"models\":" +
             std::to_string(models_.size()) +
             "}");
     }
-    if (request.method == "GET" && request.path == "/v1/models") {
-        return json_response(models_json());
+    else if (request.method == "GET" && request.path == "/v1/models") {
+        response = json_response(models_json());
     }
-    if (request.method == "GET" && request.path == "/v1/audio/voices") {
-        return handle_voices(request);
+    else if (request.method == "GET" && request.path == "/v1/audio/voices") {
+        response = handle_voices(request);
     }
-    if (request.method == "POST" && request.path == "/v1/audio/speech") {
-        return handle_speech(request.body);
+    else if (request.method == "POST" && request.path == "/v1/audio/speech") {
+        response = handle_speech(request.body);
     }
-    if (request.method == "POST" && request.path == "/v1/audio/transcriptions") {
-        return handle_transcription(request);
+    else if (request.method == "POST" && request.path == "/v1/audio/transcriptions") {
+        response = handle_transcription(request);
     }
-    if (request.method == "POST" && request.path == "/v1/tasks/run") {
-        return handle_generic_run(request.body);
+    // Separate path rather than a flag on the endpoint above: the input transport
+    // differs (raw chunked PCM vs a complete upload), so keeping it distinct leaves
+    // every existing transcription client untouched.
+    else if (request.method == "POST" && request.path == "/v1/audio/transcriptions/live") {
+        response = handle_transcription_live(request);
     }
-    if (request.method == "POST" && request.path == "/v1/tasks/stream") {
-        return handle_generic_stream(request.body);
+    else if (request.method == "POST" && request.path == "/v1/tasks/run") {
+        response = handle_generic_run(request.body);
     }
-    return error_response(404, "unknown endpoint: " + request.path, "not_found");
+    else if (request.method == "POST" && request.path == "/v1/tasks/stream") {
+        response = handle_generic_stream(request.body);
+    }
+    else {
+        response = error_response(404, "unknown endpoint: " + request.path, "not_found");
+    }
   } catch (const ServerBusyError & ex) {
     // Non-streaming requests surface the busy state as 503 before any response is
     // sent. (Streaming requests acquire the lock inside the stream body, after
     // headers are sent, so there it becomes a stream error event instead.)
-    return error_response(503, ex.what(), "server_busy");
+    response = error_response(503, ex.what(), "server_busy");
   }
+  if (!allowed_origin.empty()) {
+      response.headers["Access-Control-Allow-Origin"] = allowed_origin;
+  }
+  return response;
 }
 
 void ServerState::load_models() {
@@ -661,6 +777,24 @@ void ServerState::ensure_model_loaded_locked(LoadedModel & model) {
     session_options.backend.threads = config_.threads;
     session_options.options = model.config.session_options;
 
+    engine::debug::trace_log_scalar("server.model.id", model.config.id);
+    engine::debug::trace_log_scalar("server.model.family", model.config.family);
+    engine::debug::trace_log_scalar(
+        "server.model.task",
+        std::string_view(engine::runtime::to_string(model.task.task)));
+    engine::debug::trace_log_scalar(
+        "server.model.mode",
+        std::string_view(engine::runtime::to_string(model.task.mode)));
+    engine::debug::trace_log_scalar("server.model.backend", std::string_view(backend_name(session_options.backend.type)));
+    engine::debug::trace_log_scalar("server.model.device", int64_t{session_options.backend.device});
+    engine::debug::trace_log_scalar("server.model.threads", int64_t{session_options.backend.threads});
+    engine::debug::trace_log_scalar(
+        "server.model.session_option_count",
+        static_cast<int64_t>(session_options.options.size()));
+    for (const auto & [key, value] : session_options.options) {
+        engine::debug::trace_log_scalar("server.model.session_options." + key, value);
+    }
+
     auto loaded_model = registry.load(load_request);
     auto session = loaded_model->create_task_session(model.task, session_options);
     auto * offline = dynamic_cast<engine::runtime::IOfflineVoiceTaskSession *>(session.get());
@@ -675,6 +809,18 @@ void ServerState::ensure_model_loaded_locked(LoadedModel & model) {
     model.session = std::move(session);
     model.offline = offline;
     model.streaming = streaming;
+}
+
+LiveIngestLimits ServerState::live_ingest_limits(const HttpRequest & request) const {
+    const std::string model_id = query_param(request.query, "model");
+    if (model_id.empty()) {
+        return config_.live_ingest;
+    }
+    const auto it = model_index_.find(model_id);
+    if (it == model_index_.end()) {
+        return config_.live_ingest;
+    }
+    return resolve_live_ingest_limits(config_.live_ingest, models_.at(it->second)->config.live_ingest);
 }
 
 ServerState::LoadedModel & ServerState::require_model(const Value & body) {
@@ -804,9 +950,14 @@ ServerState::TimedTaskResult ServerState::run_model(
     return TimedTaskResult{std::move(result), elapsed_ms(started), std::nullopt};
 }
 
-ServerState::TimedTaskResult ServerState::run_streaming_model(
+// `audio` selects where the samples come from: null means request.audio_input, as
+// every caller did before live ingest existed; non-null pulls them from a stream
+// as they arrive. Everything else — locking, preparation, timing — is identical,
+// so both entry points share this body rather than drifting apart.
+ServerState::TimedTaskResult ServerState::run_streaming_model_impl(
     LoadedModel & model,
     const engine::runtime::TaskRequest & request,
+    const minitts::app::AudioChunkStream * audio,
     const std::function<void(const engine::runtime::StreamEvent &)> & event_sink,
     std::optional<int> busy_timeout_ms) {
     BusyGuard::Lock lock = acquire_model_run(model, busy_timeout_ms);
@@ -817,23 +968,40 @@ ServerState::TimedTaskResult ServerState::run_streaming_model(
     const auto started = Clock::now();
     model.session->prepare(engine::runtime::build_preparation_request(request));
     TimedTaskResult timed_result;
-    auto result = minitts::app::run_streaming_task(
-        *model.streaming,
-        request,
-        [&](const engine::runtime::StreamEvent & event) {
-            if (!timed_result.ttft_ms.has_value() && stream_event_has_output(event)) {
-                timed_result.ttft_ms = elapsed_ms(started);
-            }
-            if (event_sink) {
-                event_sink(event);
-            }
-        });
+    const auto sink = [&](const engine::runtime::StreamEvent & event) {
+        if (!timed_result.ttft_ms.has_value() && stream_event_has_output(event)) {
+            timed_result.ttft_ms = elapsed_ms(started);
+        }
+        if (event_sink) {
+            event_sink(event);
+        }
+    };
+    auto result = audio != nullptr
+        ? minitts::app::run_streaming_task(*model.streaming, request, sink, *audio)
+        : minitts::app::run_streaming_task(*model.streaming, request, sink);
     timed_result.result = std::move(result);
     timed_result.wall_ms = elapsed_ms(started);
     if (!timed_result.ttft_ms.has_value() && task_result_has_output(timed_result.result)) {
         timed_result.ttft_ms = timed_result.wall_ms;
     }
     return timed_result;
+}
+
+ServerState::TimedTaskResult ServerState::run_streaming_model(
+    LoadedModel & model,
+    const engine::runtime::TaskRequest & request,
+    const std::function<void(const engine::runtime::StreamEvent &)> & event_sink,
+    std::optional<int> busy_timeout_ms) {
+    return run_streaming_model_impl(model, request, nullptr, event_sink, busy_timeout_ms);
+}
+
+ServerState::TimedTaskResult ServerState::run_streaming_model_from(
+    LoadedModel & model,
+    const engine::runtime::TaskRequest & request,
+    const minitts::app::AudioChunkStream & audio,
+    const std::function<void(const engine::runtime::StreamEvent &)> & event_sink,
+    std::optional<int> busy_timeout_ms) {
+    return run_streaming_model_impl(model, request, &audio, event_sink, busy_timeout_ms);
 }
 
 HttpResponse ServerState::handle_speech(const std::string & body_text) {
@@ -970,6 +1138,7 @@ HttpResponse ServerState::handle_transcription_json(const std::string & body_tex
 // spooled to a temp file and routed through the existing JSON request builder.
 HttpResponse ServerState::handle_transcription_multipart(const std::string & body_text, const std::string & boundary) {
     const auto parts = parse_multipart_body(body_text, boundary);
+    log_multipart_request_summary_if_enabled(config_, parts);
 
     const MultipartPart * file_part = nullptr;
     std::string model_id;
@@ -1086,6 +1255,154 @@ HttpResponse ServerState::run_transcription_stream(
     });
 }
 
+// Live PCM ingest. The client streams raw interleaved samples in a chunked request
+// body while transcript deltas stream back as SSE on the same connection, so
+// partials track capture instead of waiting for a finished upload. Same event shape
+// as the file-backed `stream=true` path, so a client can share one SSE reader.
+//
+// Deliberately a single request rather than open/append/finish session endpoints:
+// the busy lock is held for the length of a run, so a session spread across
+// separate requests would pin the model while idling between a client's appends —
+// and wedge it outright if that client vanished. One request bounds the lock by the
+// lifetime of the connection.
+HttpResponse ServerState::handle_transcription_live(const HttpRequest & request) {
+    if (request.body_stream == nullptr) {
+        return error_response(
+            400,
+            "live transcription requires an incrementally delivered body (Transfer-Encoding: chunked)",
+            "invalid_request_error");
+    }
+
+    // Everything from here to the end of parameter parsing validates client input, so
+    // a failure is the caller's fault and belongs in a 4xx. Left to propagate, these
+    // would reach the generic handler and be reported as 500, which tells a client
+    // to retry an identical request that cannot ever succeed.
+    LoadedModel * model_ptr = nullptr;
+    int sample_rate = 16000;
+    int channels = 1;
+    std::optional<int> busy_timeout_ms;
+    minitts::app::PcmSampleFormat sample_format = minitts::app::PcmSampleFormat::S16LE;
+    engine::runtime::TaskRequest task_request;
+    try {
+        const std::string model_id = query_param(request.query, "model");
+        if (model_id.empty()) {
+            throw std::runtime_error("live transcription requires a 'model' query parameter");
+        }
+        // There is no request body to carry JSON — it is all audio — so the parameters
+        // arrive as query params and are re-shaped into the object require_model expects.
+        engine::io::json::Value::Object fields;
+        fields.emplace("model", engine::io::json::Value::make_string(model_id));
+        const auto body = engine::io::json::Value::make_object(std::move(fields));
+        auto & model = require_model(body);
+        if (model.task.mode != engine::runtime::RunMode::Streaming) {
+            throw std::runtime_error(
+                "live transcription requires a model configured with mode=streaming: " +
+                model.config.id);
+        }
+        model_ptr = &model;
+
+        // These two are not merely descriptive: the streaming policy multiplies them
+        // into a per-chunk sample count, which sizes a buffer allocated after the model
+        // lock has been taken. Left unbounded, a request naming an absurd rate or
+        // channel count overflows that multiplication or asks for a multi-terabyte
+        // allocation while holding the lock, so both are range-checked at the edge.
+        const auto parse_bounded_int = [&](const char * key, int fallback, int minimum, int maximum) {
+            const std::string raw = query_param(request.query, key);
+            if (raw.empty()) {
+                return fallback;
+            }
+            // Parsed to the end of the string on purpose: stoi stops at the first
+            // non-digit, so "16000junk" would silently become 16000. A misdeclared
+            // format produces a confident, wrong transcript, so reject it instead.
+            long long value = 0;
+            size_t consumed = 0;
+            try {
+                value = std::stoll(raw, &consumed);
+            } catch (const std::exception &) {
+                throw std::runtime_error(
+                    std::string("live transcription ") + key + " must be an integer");
+            }
+            if (consumed != raw.size()) {
+                throw std::runtime_error(
+                    std::string("live transcription ") + key + " must be an integer");
+            }
+            if (value < minimum || value > maximum) {
+                throw std::runtime_error(
+                    std::string("live transcription ") + key + " must be between " +
+                    std::to_string(minimum) + " and " + std::to_string(maximum));
+            }
+            return static_cast<int>(value);
+        };
+        sample_rate = parse_bounded_int("sample_rate", 16000, 1000, 384'000);
+        channels = parse_bounded_int("channels", 1, 1, 16);
+        // The other routes take this in their JSON body; this one has no body to put
+        // it in, so it arrives as a query param. Same meaning either way: a request
+        // may shorten its own wait for the model lock but never lengthen it past the
+        // configured ceiling — resolve_busy_timeout_ms clamps it.
+        if (!query_param(request.query, "busy_timeout_ms").empty()) {
+            busy_timeout_ms = parse_bounded_int(
+                "busy_timeout_ms", 0, 0, std::numeric_limits<int>::max());
+        }
+        const std::string sample_format_name = query_param(request.query, "sample_format");
+        sample_format = minitts::app::parse_pcm_sample_format(
+            sample_format_name.empty() ? "s16le" : sample_format_name);
+
+        // Format contract with no samples: prepare() takes the rate and channel count
+        // from here, and the samples themselves arrive from the body. Same shape the
+        // CLI's stdin path builds (app/cli/main.cpp:472-482).
+        engine::runtime::AudioBuffer audio_contract;
+        audio_contract.sample_rate = sample_rate;
+        audio_contract.channels = channels;
+        task_request.audio_input = std::move(audio_contract);
+        const std::string language = query_param(request.query, "language");
+        if (!language.empty()) {
+            task_request.options["language"] = language;
+            task_request.text_input = engine::runtime::Transcript{std::string(), language};
+        }
+    } catch (const std::runtime_error & ex) {
+        // Deliberately runtime_error and not exception: every rejection above is
+        // thrown as one, while a genuine server fault inside this block is not.
+        // std::bad_alloc derives from std::exception directly and std::out_of_range
+        // from std::logic_error, so both keep propagating to the 500 path instead of
+        // being mislabelled as the caller's mistake.
+        return error_response(400, ex.what(), "invalid_request_error");
+    }
+
+    std::istream * pcm_input = request.body_stream;
+    return sse_response(
+        [this, model_ptr, task_request, pcm_input, sample_rate, channels, sample_format, busy_timeout_ms](
+            HttpStreamWriter & writer) {
+            const minitts::app::AudioStreamFormat format{sample_rate, channels};
+            const auto audio = minitts::app::make_pcm_chunk_stream(*pcm_input, format, sample_format);
+            const auto timed_result = run_streaming_model_from(
+                *model_ptr,
+                task_request,
+                audio,
+                [&](const engine::runtime::StreamEvent & event) {
+                    if (!event.partial_text.has_value() || event.partial_text->text.empty()) {
+                        return;
+                    }
+                    write_sse(
+                        writer,
+                        "{\"type\":\"transcript.text.delta\",\"delta\":" +
+                            json_quote(event.partial_text->text) +
+                            "}");
+                },
+                busy_timeout_ms);
+            if (!timed_result.result.text_output.has_value()) {
+                throw std::runtime_error("live transcription result did not contain transcript text");
+            }
+            write_sse(
+                writer,
+                "{\"type\":\"transcript.text.done\",\"text\":" +
+                    json_quote(timed_result.result.text_output->text) +
+                    ",\"timing\":" +
+                    ttft_timing_json(require_ttft_ms(timed_result.ttft_ms)) +
+                    "}");
+            write_sse_done(writer);
+        });
+}
+
 HttpResponse ServerState::handle_generic_run(const std::string & body_text) {
     const auto body = engine::io::json::parse(body_text);
     auto & model = require_model(body);
@@ -1194,6 +1511,16 @@ std::string ServerState::models_json() const {
     }
     out << "]}";
     return out.str();
+}
+
+std::string ServerState::get_allowed_origin(const HttpRequest & request) const {
+    // TODO: Handle lists of specific origins.
+    if (config_.cors_origins == "*") {
+        if (const auto it = request.headers.find("origin"); it != request.headers.end()) {
+            return it->second;
+        }
+    }
+    return "";
 }
 
 }  // namespace minitts::server

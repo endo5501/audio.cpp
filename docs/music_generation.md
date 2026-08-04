@@ -1,5 +1,11 @@
 # Music And Sound Generation
 
+| Model | Family | Main Route(s) | Quick Start |
+|---|---|---|---|
+| ACE-Step | `ace_step` | text-to-music, edit, cover, repaint | [ACE-Step](#ace-step) |
+| Stable Audio | `stable_audio` | music, SFX, init-audio, inpaint | [Stable Audio](#stable-audio) |
+| HeartMuLa | `heartmula` | lyrics/tags to music | [HeartMuLa](#heartmula) |
+
 Use `--task gen` for models that generate music, sound effects, or audio from text and optional audio conditioning. These models are not TTS models: text chunking for speech TTS does not apply unless a model explicitly documents a long-output mode.
 
 Common CLI shape:
@@ -10,7 +16,7 @@ audiocpp_cli --task gen --family <family> --model <model-dir> --backend cuda ...
 
 ## ACE-Step
 
-ACE-Step generates and edits music from prompts, lyrics, and optional source audio. See [ace_step.md](ace_step.md) for the full route manual.
+ACE-Step generates and edits music from prompts, lyrics, and optional source audio. See [ace_step.md](models/ace_step.md) for the full route manual.
 
 | Field | Value |
 |---|---|
@@ -38,7 +44,7 @@ audiocpp_cli --task gen --family ace_step --model models/Ace-Step1.5 --backend c
 
 ## Stable Audio
 
-Stable Audio generates music or sound effects from text. It can also use source audio for init-audio or inpainting workflows. See [stable_audio.md](stable_audio.md) for the full Stable Audio manual.
+Stable Audio generates music or sound effects from text. It can also use source audio for init-audio or inpainting workflows. See [stable_audio.md](models/stable_audio.md) for the full Stable Audio manual.
 
 | Field | Value |
 |---|---|
@@ -104,17 +110,39 @@ audiocpp_cli --task gen --family heartmula --model models/HeartMuLa --backend cu
 | `--text` | text | required | Music prompt or short description. |
 | `--lyrics` | text | empty string | Lyrics for generated music. |
 | `--request-option tags=<text>` | comma-separated text | required | Music tags; the model path wraps them as tag tokens internally. |
-| `--duration-seconds` | seconds | `120` | Maximum generated duration. |
+| `--request-option duration_sec=<seconds>` | seconds | `120` | Maximum generated duration. |
 | `--temperature` | float | `1.0` | Music-token sampling temperature. |
 | `--top-k` | integer | `50` | Music-token top-k sampling limit. |
 | `--guidance-scale` | float | `1.5` | MuLa classifier-free guidance scale. |
 | `--num-inference-steps` | integer | `10` | Codec flow solver steps. |
-| `--request-option codec_duration=<seconds>` | seconds | `29.76` | Codec detokenization chunk duration. |
+| `--request-option codec_duration_sec=<seconds>` | seconds | `29.76` | Codec detokenization chunk duration. |
 | `--request-option codec_guidance_scale=<float>` | float | `1.25` | Codec classifier-free guidance scale. |
 | `--request-option infinite_mode=true|false` | bool | `false` | Generate long outputs by splitting lyrics into bounded HeartMuLa requests. |
 | `--text-chunk-size` | chars | `4096` | Text chunk size for infinite mode. |
-| `--request-option infinite_chunk_audio_length_ms=<n>` | milliseconds | `240000` | Per-chunk audio cap for infinite mode. |
+| `--request-option infinite_chunk_audio_duration_ms=<n>` | milliseconds | `240000` | Per-chunk audio cap for infinite mode. |
 | `--seed` | integer | `1234` | Generation seed. |
+| `--session-option heartmula.weight_type=<type>` | `native`, `f32`, `f16`, `bf16`, `q8_0` | `native` | MuLa and codec weight storage type. |
+| `--session-option heartmula.generator_weight_type=<type>` | `native`, `f32`, `f16`, `bf16`, `q8_0` | `heartmula.weight_type` or `native` | MuLa music-token generator weight storage type. |
+| `--session-option heartmula.codec_weight_type=<type>` | `native`, `f32`, `f16`, `bf16`, `q8_0` | `heartmula.weight_type` or `native` | Codec weight storage type. |
 | `--session-option heartmula.mem_saver=true|false` | bool | `false` | Release staged graph/cache state after AR/codec phases and infinite-mode chunks to reduce resident VRAM. Later requests may rebuild released graphs. |
 
-For backend weight-type controls, use `audiocpp_cli --inspect --model <model-dir> --family <family>`.
+Compatibility mapping:
+
+| Legacy option | Schema-v1 option |
+|---|---|
+| `duration_seconds` | `duration_sec` |
+| `codec_duration` | `codec_duration_sec` |
+| `infinite_chunk_audio_length_ms` | `infinite_chunk_audio_duration_ms` |
+| `heartmula.mula_weight_type` | `heartmula.generator_weight_type` |
+| `heartmula.mula_weight_context_mb` | `heartmula.generator_weight_context_mb` |
+| `heartmula.mula_constant_context_mb` | `heartmula.generator_constant_context_mb` |
+| `heartmula.mula_backbone_prefill_graph_arena_mb` | `heartmula.backbone_prefill_graph_arena_mb` |
+| `heartmula.mula_backbone_step_graph_arena_mb` | `heartmula.backbone_step_graph_arena_mb` |
+| `heartmula.mula_decoder_prefill_graph_arena_mb` | `heartmula.decoder_prefill_graph_arena_mb` |
+| `heartmula.mula_decoder_step_graph_arena_mb` | `heartmula.decoder_step_graph_arena_mb` |
+| `heartmula.mula_frame_embedding_graph_arena_mb` | `heartmula.frame_embedding_graph_arena_mb` |
+| `heartmula.codec_flow_estimator_graph_arena_mb` | `heartmula.flow_estimator_graph_arena_mb` |
+| `heartmula.codec_conditioning_graph_arena_mb` | `heartmula.conditioning_graph_arena_mb` |
+| `heartmula.codec_scalar_decoder_graph_arena_mb` | `heartmula.scalar_decoder_graph_arena_mb` |
+
+For the full backend memory-arena controls, use `audiocpp_cli --help --model <model-dir> --family heartmula`.

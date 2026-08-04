@@ -1,6 +1,8 @@
 #pragma once
 
+#include "engine/framework/model_spec/metadata.h"
 #include "engine/framework/runtime/cache_slots.h"
+#include "engine/framework/runtime/model.h"
 #include "engine/framework/runtime/session_base.h"
 #include "engine/models/irodori_tts/assets.h"
 #include "engine/models/irodori_tts/tokenizer_text.h"
@@ -16,6 +18,8 @@
 
 namespace engine::models::irodori_tts {
 
+std::shared_ptr<runtime::IVoiceModelLoader> make_irodori_tts_loader();
+
 class IrodoriCodec;
 class IrodoriConditionEncoder;
 class IrodoriRfSampler;
@@ -24,7 +28,8 @@ class IrodoriTTSSession final : public runtime::RuntimeSessionBase,
                                 public runtime::IOfflineVoiceTaskSession {
 public:
   IrodoriTTSSession(runtime::TaskSpec task, runtime::SessionOptions options,
-                    std::shared_ptr<const IrodoriTTSAssets> assets);
+                    std::shared_ptr<const IrodoriTTSAssets> assets,
+                    std::shared_ptr<const engine::model_spec::ModelContract> contract);
   ~IrodoriTTSSession() override;
 
   std::string family() const override;
@@ -71,13 +76,14 @@ private:
 
   runtime::TaskSpec task_;
   std::shared_ptr<const IrodoriTTSAssets> assets_;
+  std::shared_ptr<const engine::model_spec::ModelContract> contract_;
   IrodoriTextTokenizer tokenizer_;
   size_t condition_graph_arena_bytes_ = 256ull * 1024ull * 1024ull;
   size_t rf_graph_arena_bytes_ = 768ull * 1024ull * 1024ull;
   size_t codec_graph_arena_bytes_ = 512ull * 1024ull * 1024ull;
-  size_t condition_weight_context_bytes_ = 512ull * 1024ull * 1024ull;
-  size_t rf_weight_context_bytes_ = 768ull * 1024ull * 1024ull;
-  size_t codec_weight_context_bytes_ = 512ull * 1024ull * 1024ull;
+  size_t condition_weight_context_bytes_ = 32ull * 1024ull * 1024ull;
+  size_t rf_weight_context_bytes_ = 32ull * 1024ull * 1024ull;
+  size_t codec_weight_context_bytes_ = 32ull * 1024ull * 1024ull;
   // codec デコードのタイル設定。tile は未指定ならバックエンド既定
   // (Vulkan 256 / それ以外 512) を IrodoriCodec 側で解決する。
   std::optional<int64_t> codec_decode_tile_frames_;

@@ -1,6 +1,6 @@
 #include "engine/models/demucs/assets.h"
 
-#include "engine/framework/assets/model_package.h"
+#include "engine/framework/model_spec/package.h"
 #include "engine/framework/io/json.h"
 
 #include <cmath>
@@ -140,11 +140,9 @@ void validate_demucs_weight_storage_type(assets::TensorStorageType storage_type)
     }
 }
 
-std::shared_ptr<const HTDemucsAssets> load_htdemucs_assets(const runtime::ModelLoadRequest & request) {
+std::shared_ptr<const HTDemucsAssets> load_htdemucs_assets(const std::filesystem::path & model_path) {
     auto out = std::make_shared<HTDemucsAssets>();
-    out->resources = assets::load_resource_bundle_from_package_spec(
-        request.model_path,
-        assets::default_model_package_spec_path("htdemucs"));
+    out->resources = engine::model_spec::load_resource_bundle_for_family(model_path, "htdemucs");
     out->manifest = parse_package_manifest(out->resources);
     out->submodels.push_back(load_submodel(out->resources));
     return out;

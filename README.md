@@ -2,10 +2,14 @@
 
 `audio.cpp` is a high-performance C++ audio inference framework built on top of `ggml`, designed to make modern local audio models practical, portable, and fast.
 
-Tired of juggling a dozen Conda environments, hundreds of Python packages, and dependency conflicts just to try a few audio models? audio.cpp gives those paths a shared native runtime instead.
+Tired of juggling a dozen Conda environments, hundreds of Python packages, and dependency conflicts just to try a few audio models? audio.cpp gives those paths a shared native runtime instead. Runs on Windows, Linux, and macOS, with support for NVIDIA, AMD, Apple Silicon, and CPU-only machines.
 
 > [!IMPORTANT]
-> **CUDA performance headline:** multiple TTS paths already run **1.8x-5.0x faster than their Python reference paths** while cutting end-to-end latency by **45%-80%**.
+> **CUDA performance headline:** multiple TTS paths already run **1.8x to up to 8x faster than their Python reference paths** while cutting end-to-end latency by **45%-85%**.
+>
+> **GGUF performance:** all released model families support GGUF loading, and tested Q8 packages can run up to **1.53x faster** while reducing peak VRAM by up to about **37%** on routes such as Higgs Audio, Fish Audio, and Voxtral. See the [GGUF guide](docs/gguf.md) for support status and the [Q8 performance report](docs/reports/gguf_q8_performance.md) for 16-bit vs Q8 measurements.
+>
+> **Production deployment example:** Try Fun-ASR-Nano with audio.cpp on the FunASR platform https://www.funasr.com/en/deploy/audio-cpp.html!
 >
 > **VibeVoice 1.5B:** generates a **93.9-minute podcast in 18.2 minutes** with **10 diffusion steps** and without quantization, running about **5.15x faster than real time**.
 >
@@ -20,7 +24,7 @@ Highlights:
 
 - **Parity.** Strong parity tooling against Python reference paths.
 - **Performance.** Performance-focused execution, reusable sessions, and batch-style offline inference. **Optimized for CUDA**.
-- **Portability.** A portable native stack centered on `ggml`, with CLI and server entry points instead of Python-only deployment paths.
+- **Portability.** A portable native stack centered on `ggml`, with CUDA, HIP/ROCm, Vulkan, Metal, and CPU backends behind shared CLI and server entry points instead of Python-only deployment paths.
 - **Pipelines.** Experimental JSON pipeline support for higher-level multi-step workflows.
 - **Audio Utilities.** Built-in denoise, enhancement, resampling, and STFT/ISTFT utilities for real production-style task paths.
 
@@ -31,82 +35,184 @@ audio.cpp would not be moving this quickly without generous contributors bringin
 > [!TIP]
 > **Contribution focus:** the most helpful contributions right now are improvements to the UI, API server, and pipeline/workflow subsystems. These areas make the existing model surface easier to use, serve, compose, and validate. See [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
 >
-> **New model PRs:** before starting a new model port, **please check the supported model table because several families are already implemented or under testing**. If you do add a model, follow the validation style in [PR #19](https://github.com/0xShug0/audio.cpp/pull/19): include exact build/run commands, model paths or package ids, generated outputs, parity or path-test results, and relevant performance or memory notes.
+> **New model PRs:** before starting a new model port, **please check the supported model table because several families are already implemented or under testing**. New ports should start under the [community models](docs/community_models/models.md) surface, where review is lighter than core models but still needs reproducible validation. Please follow the measurement style in [PR #19](https://github.com/0xShug0/audio.cpp/pull/19) and [PR #63](https://github.com/0xShug0/audio.cpp/pull/63): exact build/run commands, model paths or package ids, generated outputs, parity or path-test results, and relevant performance or memory notes.
 
 ## News
 
 > [!IMPORTANT]
-> **2026-07-18 - Voxtral Realtime ASR:** Voxtral is now released in audio.cpp with offline and streaming ASR paths. On warmed normal requests, BF16 GGUF runs at **RTF 0.089** (**11.2x realtime**) and Q8_0 at **RTF 0.064** (**15.7x realtime**); CUDA streaming TTFT is about **209 ms** with BF16 and **171 ms** with Q8_0.
+> **2026-08-03 - Irodori-TTS v4 Small:** Irodori-TTS v4 Small is now available as the preferred Japanese TTS package, with GGUF Q8/F16 builds covering no-reference TTS, voice cloning, and caption-based voice design in one checkpoint.
 >
-> **2026-07-14 - Release 0.3:** This release expands audio.cpp with five new TTS families: IndexTTS2, Irodori-TTS, MOSS-TTS-Nano, MOSS-TTS-Local (thanks to [@justinjohn0306](https://github.com/justinjohn0306)), and Supertonic 3. Chatterbox also gains voice-conversion support, extending the existing TTS/voice-cloning path into a fuller speech workflow.
+> **2026-07-31 - Release 0.5:** audio.cpp grows to **44 model families** with **9 new additions**: DramaBox, Confucius4-TTS, RVC, BS-RoFormer, GLM-TTS, Kroko ASR, Parakeet-TDT, Inflect v2, and Fun-ASR-Nano.
 >
-> **GGUF support:** audio.cpp now has reusable GGUF loading and conversion support, with tested GGUF paths for multiple ASR and TTS models. Some models can run up to 2× faster with Q8 GGUF, without any parity drift. See [docs/gguf.md](docs/gguf.md) for the current support status. Huge thanks to [@mirek190](https://github.com/mirek190) for driving the core GGUF work and model support forward.
+> **HIP/ROCm support:** Platform coverage also takes a big step forward! Early HIP/ROCm support lands for AMD GPUs thanks to [@IIIIIllllIIIIIlllll](https://github.com/IIIIIllllIIIIIlllll), with Nix ROCm/HIP build support from [@francescobozzo](https://github.com/francescobozzo).
+>
+> **Metal performance boost:** Thanks to [@liuzl](https://github.com/liuzl), Metal ops were optimized, making tested VoxCPM2 end-to-end runs up to **2.56x faster** on Apple Silicon. Many models should benefit from these optimizations.
+>
+> This release is a major GGUF-first usability pass. The WebUI now uses model-spec package links for downloads, prefers standalone GGUF packages when available, and handles more models directly from the normal UI flow. New schema-v1 specs make model options, packages, metadata, and UI-facing behavior much easier to keep in sync.
+>
+> **2026-07-23 - Release 0.4:** audio.cpp expanded to **35 model families**, adding Higgs Audio v3 TTS 4B, Fish Audio S2 Pro, Voxtral Realtime ASR, community OuteTTS and VieNeu-TTS, broader GGUF/package-spec support, reusable framework improvements, and the integrated WebUI thanks to [@kigner](https://github.com/kigner) and [@patrickjchen](https://github.com/patrickjchen).
+>
+> **2026-07-14 - Release 0.3:** This release added IndexTTS2, Irodori-TTS, MOSS-TTS-Nano, MOSS-TTS-Local, Supertonic 3, Chatterbox voice conversion, and the first broad GGUF loading/conversion wave. Thanks to [@justinjohn0306](https://github.com/justinjohn0306) for MOSS-TTS-Local and [@mirek190](https://github.com/mirek190) for driving GGUF forward.
 
 **2026-06-25 to 2026-07-08:** audio.cpp grew from the first released model wave into broad TTS, ASR, music generation, source separation, VAD, diarization, codec, and voice-conversion coverage, with VibeVoice 1.5B/7B, LoRA adapter loading, initial streaming support, and major CUDA Conv1DTransp speedups.
 
 ## Supported Models
 
-| Family | Task | Supported language(s) | Supported variant(s) in this repo |
-|---|---|---|---|
-| **ace_step** | music generation, music editing | 50+ langs | ACE-Step 1.5 Turbo and Base with acestep-5Hz-lm-1.7B |
-| **chatterbox** | TTS, voice cloning, voice conversion | ar, da, de, el, en, es, fi, fr, hi, it, ko, ms, nl, no, pl, pt, sv, sw, tr | Chatterbox with 0.5B backbone |
-| **citrinet_asr** | ASR | en | Citrinet-256 |
-| **heartmula** | music generation | zh, en, ja, ko, es | HeartMuLa-oss-3B with HeartCodec-oss |
-| **higgs_audio_stt** | ASR | en | Higgs Audio v3 STT |
-| **htdemucs** | source separation | lang agnostic | HTDemucs, HTDemucs_ft |
-| **hviske_asr** | ASR | da | Hviske v5.3 |
-| **marblenet_vad** | VAD | lang agnostic | MarbleNet VAD |
-| **mel_band_roformer** | vocal separation | lang agnostic | Mel-Band RoFormer MLX vocal separation variants |
-| **miocodec** | audio codec, voice conversion backend | lang agnostic | MioCodec v2, 25 Hz, 44.1 kHz |
-| **miotts** | TTS, voice cloning | en, ja | MioTTS-1.7B |
-| **omnivoice** | TTS, voice cloning, voice design | 646+ langs | OmniVoice, Qwen3-0.6B based |
-| **pocket_tts** | TTS, voice cloning | en, de, it, pt, es | PocketTTS-100M |
-| **nemotron_asr** | ASR | 100+ ASR prompt codes incl. auto | Nemotron 3.5 ASR Streaming 0.6B |
-| **qwen3_asr** | ASR | zh, en, yue, ar, de, fr, es, pt, id, it, ko, ru, th, vi, ja, tr, hi, ms, nl, sv, da, fi, pl, cs, fil, fa, el, ro, hu, mk | Qwen3-ASR-0.6B, Qwen3-ASR-1.7B-hf |
-| **qwen3_forced_aligner** | forced alignment | zh, yue, en, de, es, fr, it, pt, ru, ko, ja | Qwen3-ForcedAligner-0.6B |
-| **qwen3_tts** | TTS, voice cloning, voice design | zh, en, fr, de, it, ja, ko, pt, ru, es | Qwen3-TTS-12Hz-0.6B-Base, Qwen3-TTS-12Hz-1.7B-Base, Qwen3-TTS-12Hz-1.7B-CustomVoice, Qwen3-TTS-12Hz-1.7B-VoiceDesign |
-| **seed_vc** | voice conversion | lang agnostic | SeedVC XLS-R + HiFT, SeedVC Whisper-small + BigVGAN |
-| **silero_vad** | VAD | lang agnostic | Silero VAD |
-| **sortformer_diar** | diarization | en | Sortformer-4spk-v1 |
-| **stable_audio** | music generation, sound generation, audio editing | en | Stable Audio 3 Small Music, Stable Audio 3 Small SFX, Stable Audio 3 Medium |
-| **vevo2** | TTS, singing generation, voice conversion, singing conversion, editing | en, zh | Vevo2 with Qwen2.5-0.5B AR model |
-| **vibevoice** | TTS, multi-speaker dialogue TTS | en, zh | VibeVoice-1.5B, VibeVoice-7B |
-| **vibevoice_asr** | ASR | auto | VibeVoice ASR |
-| **voxtral_realtime** | ASR | auto | Voxtral-Mini-4B-Realtime-2602 |
-| **voxcpm2** | TTS, voice cloning, voice design | ar, da, de, el, en, es, fi, fr, he, hi, id, it, ja, km, ko, lo, ms, my, nl, no, pl, pt, ru, sv, sw, th, tl, tr, vi, zh | VoxCPM2-2B, 48 kHz |
-| **index_tts2** | TTS, voice cloning, expressive speech | zh, en | IndexTTS-2 |
-| **irodori_tts** | TTS, voice cloning, voice design | ja | Irodori-TTS-500M-v3, Irodori-TTS-600M-v3-VoiceDesign |
-| **moss_tts_nano** | TTS, voice cloning | auto | MOSS-TTS-Nano-100M |
-| **moss_tts_local** | TTS, voice cloning | auto, optional language hint | MOSS-TTS-Local-Transformer-v1.5 |
-| **supertonic** | TTS | en, ko, ja, ar, bg, cs, da, de, el, es, et, fi, fr, hi, hr, hu, id, it, lt, lv, nl, pl, pt, ro, ru, sk, sl, sv, tr, uk, vi, na | Supertonic 3 |
+Task tags: `TTS` text to speech, `Clone` voice cloning, `VC` voice conversion, `ASR` speech recognition, `Align` forced alignment, `VAD` voice activity detection, `Diar` speaker diarization, `Codec` audio codec, `Sep` source separation, `Music` music/song generation, `SFX` sound effects, `Edit` audio/music editing, `Design` voice design, `Dialogue` multi-speaker dialogue TTS, `Ctrl` TTS/clone voice control such as emotion, style, instruction, caption, or non-verbal tag control.
 
-WIP: Higgs Audio v3 TTS 4B, Fish Audio S2 Pro.
+Runtime tags: safetensors is the default model loading path. `GGUF 16/Q8/Q4` means those GGUF precision or quantization paths are tested; `GGUF Q8` means only `q8_0` is tested; `GGUF F32` means the original-F32 GGUF path is tested. See [docs/gguf.md](docs/gguf.md) for precision/status details. `Bundled` means the tiny runtime asset ships under `assets/framework/models` and needs no separate model download. `Stream` means the family exposes a streaming server/session path.
 
-PocketTTS language selection is a model-load option. When the model path points at the PocketTTS root, the loader uses `english` unless you pass `--load-option language=<name>`. Kyutai's normal non-English PocketTTS releases are smaller distilled language models intended for the fast PocketTTS path. The `_24l` variants are larger 24-layer, undistilled preview models that can sound better but are slower. Kyutai currently publishes French only as `french_24l`, not as a normal distilled `french` language directory, so French is not listed as a normal PocketTTS language here.
+| Family | Task | Lang | Variants | Runtime |
+|---|---|---|---|---|
+| **ace_step** | Music, Edit | 50+ langs | ACE-Step 1.5 Turbo and Base with acestep-5Hz-lm-1.7B | GGUF 16 |
+| **bs_roformer** | Sep | lang agnostic | BS-RoFormer vocal separation checkpoints | GGUF Q8 |
+| **chatterbox** | TTS, Clone, VC| ar, da, de, el, en, es, fi, fr, hi, it, ko, ms, nl, no, pl, pt, sv, sw, tr | Chatterbox with 0.5B backbone | GGUF 16/Q8 |
+| **confucius4_tts** | Clone | zh, en, ja, ko, de, fr, es, id, it, th, pt, ru, ms, vi | Confucius4-TTS multilingual voice cloning | GGUF F32, Stream |
+| **citrinet_asr** | ASR | en | Citrinet-256 | GGUF Q8 |
+| **dramabox** | TTS, Clone | en | DramaBox expressive TTS and voice cloning | GGUF Q8 |
+| **fish_audio** | TTS, Clone, Ctrl | auto, en, zh | Fish Audio S2 Pro | GGUF 16/Q8 |
+| **fun_asr_nano** | ASR | auto, zh, en, ja | Fun-ASR-Nano-2512 | GGUF 16/Q8 |
+| **heartmula** | Music | zh, en, ja, ko, es | HeartMuLa-oss-3B with HeartCodec-oss | GGUF 16/Q8 |
+| **higgs_audio_stt** | ASR | en | Higgs Audio v3 STT | GGUF 16/Q8, Stream |
+| **higgs_audio_tts** | TTS, Clone, Ctrl | auto | Higgs Audio v3 TTS 4B | GGUF 16/Q8 |
+| **htdemucs** | Sep | lang agnostic | HTDemucs, HTDemucs_ft | GGUF 16/Q8 |
+| **hviske_asr** | ASR | da | Hviske v5.3 | GGUF Q8 |
+| **marblenet_vad** | VAD | lang agnostic | MarbleNet VAD | Bundled |
+| **mel_band_roformer** | Sep | lang agnostic | Mel-Band RoFormer MLX vocal separation variants | GGUF 16/Q8 |
+| **miocodec** | Codec, VC | lang agnostic | MioCodec v2, 25 Hz, 44.1 kHz | GGUF 16/Q8 |
+| **miotts** | TTS, Clone | en, ja | MioTTS-1.7B | GGUF 16/Q8 |
+| **omnivoice** | TTS, Clone, Design, Ctrl | 646+ langs | OmniVoice, Qwen3-0.6B based | GGUF 16/Q8, Stream |
+| **pocket_tts** | TTS, Clone | en, de, it, pt, es | PocketTTS-100M | GGUF 16/Q8 |
+| **nemotron_asr** | ASR | 100+ ASR prompt codes incl. auto | Nemotron 3.5 ASR Streaming 0.6B | GGUF 16/Q8, Stream |
+| **qwen3_asr** | ASR | zh, en, yue, ar, de, fr, es, pt, id, it, ko, ru, th, vi, ja, tr, hi, ms, nl, sv, da, fi, pl, cs, fil, fa, el, ro, hu, mk | Qwen3-ASR-0.6B, Qwen3-ASR-1.7B-hf | GGUF 16/Q8, Stream |
+| **qwen3_forced_aligner** | Align | zh, yue, en, de, es, fr, it, pt, ru, ko, ja | Qwen3-ForcedAligner-0.6B | GGUF 16/Q8 |
+| **qwen3_tts** | TTS, Clone, Design, Ctrl | zh, en, fr, de, it, ja, ko, pt, ru, es | Qwen3-TTS-12Hz-0.6B-Base, Qwen3-TTS-12Hz-1.7B-Base, Qwen3-TTS-12Hz-1.7B-CustomVoice, Qwen3-TTS-12Hz-1.7B-VoiceDesign | GGUF 16/Q8 |
+| **rvc** | VC | lang agnostic | RVC F16 GGUF with packaged v1/v2 voices and optional retrieval blending | GGUF 16 |
+| **seed_vc** | VC | lang agnostic | SeedVC XLS-R + HiFT, SeedVC Whisper-small + BigVGAN | GGUF 16/Q8 |
+| **silero_vad** | VAD | lang agnostic | Silero VAD | Bundled, Stream |
+| **sortformer_diar** | Diar | en | Sortformer-4spk-v1 | - |
+| **stable_audio** | Music, SFX, Edit | en | Stable Audio 3 Small Music, Stable Audio 3 Small SFX, Stable Audio 3 Medium | GGUF 16/Q8 |
+| **vevo2** | TTS, Music, VC, Edit | en, zh | Vevo2 with Qwen2.5-0.5B AR model | GGUF 16 |
+| **vibevoice** | TTS, Dialogue | en, zh | VibeVoice-1.5B, VibeVoice-7B | GGUF 16/Q8 |
+| **vibevoice_asr** | ASR | auto | VibeVoice ASR | GGUF 16/Q8 |
+| **voxtral_realtime** | ASR | auto | Voxtral-Mini-4B-Realtime-2602 | GGUF 16/Q8/Q4, Stream |
+| **voxcpm2** | TTS, Clone, Design, Ctrl | ar, da, de, el, en, es, fi, fr, he, hi, id, it, ja, km, ko, lo, ms, my, nl, no, pl, pt, ru, sv, sw, th, tl, tr, vi, zh | VoxCPM2-2B, 48 kHz | GGUF 16/Q8, Stream |
+| **index_tts2** | TTS, Clone, Ctrl | zh, en | IndexTTS-2 | GGUF 16/Q8 |
+| **irodori_tts** | TTS, Clone, Design, Ctrl | ja | Irodori-TTS-v4-Small, Irodori-TTS-500M-v3, Irodori-TTS-600M-v3-VoiceDesign | GGUF 16/Q8 |
+| **moss_tts_nano** | TTS, Clone | auto | MOSS-TTS-Nano-100M | GGUF 16/Q8 |
+| **moss_tts_local** | TTS, Clone, Ctrl | auto, optional language hint | MOSS-TTS-Local-Transformer-v1.5 | GGUF 16/Q8 |
+| **supertonic** | TTS | en, ko, ja, ar, bg, cs, da, de, el, es, et, fi, fr, hi, hr, hu, id, it, lt, lv, nl, pl, pt, ro, ru, sk, sl, sv, tr, uk, vi, na | Supertonic 3 | GGUF F32, Stream |
+
+Some model families in the supported table started as outside contributions before being promoted into the core release surface. Thanks to Mirek [@mirek190](https://github.com/mirek190) for BS-RoFormer, [@justinjohn0306](https://github.com/justinjohn0306) for MOSS-TTS-Local, and [@LauraGPT](https://github.com/LauraGPT) from the official FunASR team for Fun-ASR-Nano.
+
+## Community Models
+
+Community model ports live under `community_models` to make the ownership boundary clear while keeping them available through the normal audio.cpp CLI and server paths. Some community-contributed models graduate into the core model tree when they become part of the main release surface. Huge thanks to the contributors who bring these models in, test them, and keep pushing the framework into new territory. See [docs/community_models/models.md](docs/community_models/models.md) for community-model expectations and current entries.
+
+| Family | Task | Lang | Runtime | Contributor | What They Added |
+|---|---|---|---|---|---|
+| **glm_tts** | TTS, Clone | zh, en | GGUF | Mirek [@mirek190](https://github.com/mirek190) | [GLM-TTS](docs/community_models/glm_tts.md) zero-shot synthesis and voice cloning support |
+| **inflect_v2** | TTS | en | GGUF FP32 | Jan [@JanWerder](https://github.com/JanWerder) | [Inflect Micro v2 and Nano v2](docs/community_models/inflect_v2.md) native offline synthesis |
+| **kroko_asr** | ASR | de, en, es, fr, it, he, nl, pt, sv, tr | Safetensors, GGUF Q8 | Mirek [@mirek190](https://github.com/mirek190) | [Kroko Community ASR](docs/community_models/kroko_asr.md) native offline/streaming Zipformer2/RNN-T transcription with word timestamps |
+| **moss_tts_local** | TTS, Clone, Ctrl | auto, optional language hint | GGUF | [@justinjohn0306](https://github.com/justinjohn0306) | MOSS-TTS-Local Transformer v1.5 support |
+| **outetts** | TTS, Clone | en, ar, zh, nl, fr, de, it, ja, ko, lt, ru, es, pt, be, bn, ka, hu, lv, fa, pl, sw, ta, uk | GGUF | Mirek [@mirek190](https://github.com/mirek190) | Llama-OuteTTS-1.0-1B TTS and voice cloning support |
+| **parakeet_tdt** | ASR | auto, bg, cs, da, de, el, en, es, et, fi, fr, hr, hu, it, lt, lv, mt, nl, pl, pt, ro, ru, sk, sl, sv, uk | GGUF F32/16/Q8, Stream | [@dleiferives](https://github.com/dleiferives) | [Parakeet-TDT 0.6B v3](docs/community_models/parakeet_tdt.md) offline, long-form, and buffered-streaming ASR support |
+| **vietneu_tts** | TTS, Clone | vi, en | GGUF | Phuoc [@phuocnguyen90](https://github.com/phuocnguyen90) | [VieNeu-TTS-v3-Turbo](docs/community_models/vietneu_tts.md) TTS and voice cloning support |
 
 ## Docker
 
-Docker CPU and CUDA images are available for both CLI and server use. See [Docker.md](Docker.md) for build commands and working Docker examples.
+Docker CUDA and CPU images are available for both CLI and server use. See [docker.md](docs/docker.md) for
+available images, build commands and working Docker examples.
+
+## Model Manager and GGUF Downloads
+
+Use `tools/model_manager_v2.py` for normal model downloads. It reads
+`model_specs/*.json` and installs the default package for each family, preferring
+ready-to-use GGUF packages when they are available.
+
+The old safetensors/converter catalog has been renamed to
+`tools/model_manager_deprecated.py`. Use it only for legacy model layouts that
+have not moved to spec-backed GGUF packages yet.
+
+GGUF downloads:
+
+- Released model packages: [audio-cpp/audio.cpp-gguf](https://huggingface.co/audio-cpp/audio.cpp-gguf)
+- Community model package: [mirek190/audio.cpp](https://huggingface.co/mirek190/audio.cpp)
+
+See the [Model Manager guide](docs/model_manager.md) for model-manager usage and
+package notes.
+
+## WebUI
+![Maintained by contributors](https://img.shields.io/badge/maintained%20by-contributors-brightgreen)
+
+audio.cpp includes a Gradio WebUI for trying local models from the browser, managing downloads, and running common TTS/ASR/audio workflows without writing CLI commands.
+
+The WebUI lives in [webui/](webui/). See [webui/README.md](webui/README.md) for setup, launch commands, and model-download notes.
+
+Huge thanks to [@kigner](https://github.com/kigner) for the original [audio.cpp-webui](https://github.com/kigner/audio.cpp-webui), and to [@patrickjchen](https://github.com/patrickjchen) for porting and integrating it into audio.cpp.
+
+## Prebuilt Binaries
+
+- **Windows (CUDA / CPU):** official packages on the [Releases page](https://github.com/0xShug0/audio.cpp/releases).
+- **Windows (HIP/ROCm, AMD GPUs):** community-maintained packages with the ROCm runtime bundled — no HIP SDK installation required. Published from [@IIIIIllllIIIIIlllll's fork Releases](https://github.com/IIIIIllllIIIIIlllll/audio.cpp/releases) in two tracks: ROCm 6.4 (full coverage incl. RX 7600 / gfx1102) and ROCm 7.1 (recommended for RDNA4). Version numbers follow the upstream releases; see [docs/build/windows-hip-distribution.md](docs/build/windows-hip-distribution.md) for details.
 
 ## Build
 
 | OS | Requirements |
 |---|---|
-| Linux | GCC 13 or newer, CMake, backend toolchain for CUDA or Vulkan builds |
-| Windows | Visual Studio Build Tools 2022 or newer with C++ desktop workload, MSVC x64 compiler, Windows SDK, CMake, Ninja, MSVC OpenMP components; official NVIDIA CUDA Toolkit for CUDA builds |
+| Linux | GCC 13 or newer, CMake, plus the backend toolchain for the build you want: NVIDIA CUDA Toolkit for CUDA, Vulkan SDK for Vulkan, ROCm for HIP |
+| Windows | Visual Studio Build Tools 2022 or newer with C++ desktop workload, MSVC x64 compiler, Windows SDK, CMake, Ninja, MSVC OpenMP components; official NVIDIA CUDA Toolkit for CUDA builds, AMD HIP SDK for HIP builds |
 | macOS | Xcode or Xcode Command Line Tools with the Metal compiler available through `xcrun` |
+
+### Homebrew Install
+
+On macOS, audio.cpp can be installed from the Homebrew tap:
+
+```bash
+brew tap 0xShug0/audio-cpp
+brew trust 0xShug0/audio-cpp
+brew install audio-cpp
+```
+
+For Nix and NixOS builds, see [docs/build/nixos.md](docs/build/nixos.md).
+
+### Composite Builds
+
+Composite builds let you compile only the model families you need. `full` is the default and is what release/Docker builds should use. `custom` registers only the requested loaders while still linking required internal dependencies; `core` builds the runtime without the optional model-family set.
+
+The helper scripts expose this as `--model-set` and `--models` on Linux/macOS, and `-ModelSet` and `-Models` on Windows:
+
+```bash
+scripts/build_linux.sh --backend cuda --model-set custom --models qwen3_tts,pocket_tts,qwen3_asr --target audiocpp_cli
+```
+
+Direct CMake builds use the same underlying variables:
+
+```bash
+cmake -S . -B build/debug -DCMAKE_BUILD_TYPE=Debug -DAUDIOCPP_MODEL_SET=custom -DAUDIOCPP_MODELS=qwen3_tts,pocket_tts,qwen3_asr
+cmake --build build/debug --target audiocpp_cli -j 8
+```
 
 ### Linux Build
 
-Use the Linux helper script for CPU, CUDA, or Vulkan builds:
+Use the Linux helper script for CPU, CUDA, Vulkan, or HIP builds:
 
 ```bash
 scripts/build_linux.sh --backend cuda --target audiocpp_cli --target audiocpp_server
 scripts/build_linux.sh --backend vulkan --target audiocpp_cli --target audiocpp_server
+scripts/build_linux.sh --backend hip --target audiocpp_cli --target audiocpp_server
 scripts/build_linux.sh --backend cpu --target audiocpp_cli --target audiocpp_server
 ```
 
-The script writes to aligned build directories such as `build/linux-cuda-release`, `build/linux-vulkan-release`, and `build/linux-cpu-release`.
+The script writes to aligned build directories such as `build/linux-cuda-release`, `build/linux-vulkan-release`, `build/linux-hip-release`, and `build/linux-cpu-release`.
+
+Composite examples:
+
+```bash
+scripts/build_linux.sh --backend cuda --model-set full --target audiocpp_cli
+scripts/build_linux.sh --backend cuda --model-set custom --models qwen3_tts,pocket_tts,qwen3_asr --target audiocpp_cli
+scripts/build_linux.sh --backend cpu --model-set core --target audiocpp_cli
+```
 
 For portable CPU kernels on machines where native ISA flags are not suitable:
 
@@ -136,6 +242,7 @@ Common presets:
 .\scripts\build_windows.ps1 -Preset windows-cuda-release -Target audiocpp_cli
 .\scripts\build_windows.ps1 -Preset windows-cpu-release -Target audiocpp_cli
 .\scripts\build_windows.ps1 -Target audiocpp_server -Jobs 16
+.\scripts\build_windows.ps1 -Preset windows-cuda-release -ModelSet custom -Models "qwen3_tts,pocket_tts,qwen3_asr" -Target audiocpp_cli
 ```
 
 From `cmd.exe`, use the wrapper:
@@ -167,6 +274,7 @@ Useful variants:
 ```bash
 scripts/build_metal.sh --target audiocpp_server
 scripts/build_metal.sh --build-type Release --archs arm64 --target audiocpp_cli
+scripts/build_metal.sh --model-set custom --models qwen3_tts,pocket_tts --target audiocpp_cli
 scripts/build_metal.sh --with-tests --target audio_dsp_test
 scripts/build_metal.sh --openmp auto --target audiocpp_cli
 scripts/build_metal.sh --native-cpu OFF --target audiocpp_cli
@@ -179,11 +287,43 @@ The built CLI is written to:
 build/macos-metal-release/bin/audiocpp_cli
 ```
 
+### HIP/ROCm Build
+
+On Linux and Windows, HIP builds compile ggml's CUDA backend sources as HIP code for AMD GPUs. `ENGINE_ENABLE_HIP` and `ENGINE_ENABLE_CUDA` are mutually exclusive — configure with exactly one of them.
+
+Linux (the helper script auto-detects ROCm via `ROCM_PATH`/`HIP_PATH`/hipconfig and local GPU targets via `amdgpu-arch`, falling back to `rocminfo`; pass `--gpu-targets` to build for other architectures, or when no AMD GPU is visible, e.g. in a VM or container):
+
+```bash
+scripts/build_linux.sh --backend hip --target audiocpp_cli --target audiocpp_server
+scripts/build_linux.sh --backend hip --gpu-targets "gfx1100;gfx1103" --target audiocpp_cli
+```
+
+Direct CMake:
+
+```bash
+cmake -S . -B build_hip \
+  -DENGINE_ENABLE_HIP=ON \
+  -DGPU_TARGETS=gfx1151 \
+  -DCMAKE_C_COMPILER="$(hipconfig -l)/clang" \
+  -DCMAKE_CXX_COMPILER="$(hipconfig -l)/clang++" \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build_hip -j$(nproc)
+```
+
+Windows (the helper script auto-detects ROCm, GPU targets, cmake, and ninja):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows_hip.ps1
+```
+
+Run with `--backend hip` (`rocm` is accepted as an alias). For GPU target selection, hipBLASLt GEMM notes, iGPU tuning, and known limitations, see [docs/build/HIP.md](docs/build/HIP.md).
+
 ### Build Options
 
 | Option | Meaning | Default |
 |---|---|---|
 | `ENGINE_ENABLE_CUDA` | Enable the ggml CUDA backend. Required for `--backend cuda`. | `OFF` |
+| `ENGINE_ENABLE_HIP` | Enable the ggml HIP backend (AMD GPUs). Required for `--backend hip`; mutually exclusive with `ENGINE_ENABLE_CUDA`. | `OFF` |
 | `ENGINE_ENABLE_VULKAN` | Enable the ggml Vulkan backend. Required for `--backend vulkan`. | `OFF` |
 | `ENGINE_ENABLE_METAL` | Enable the ggml Metal backend. Required for `--backend metal`. | `OFF` on most platforms, `ON` on Apple |
 | `ENGINE_ENABLE_LLAMAFILE` | Enable llamafile SGEMM support in ggml CPU builds. | `ON` |
@@ -194,6 +334,8 @@ build/macos-metal-release/bin/audiocpp_cli
 | `ENGINE_BUILD_TESTS` | Build framework unit tests. | `OFF` |
 | `ENGINE_BUILD_WARMBENCH` | Build warmbench helper binaries. | `OFF` |
 | `AUDIOCPP_DEPLOYMENT_BUILD` | Compile package specs into CLI/server binaries for standalone GGUF and package-spec fallback loading. Script builds expose this as `--deployment-build` on Linux/macOS and `-DeploymentBuild` on Windows. | `OFF` |
+| `AUDIOCPP_MODEL_SET` | Model composite to build: `full`, `core`, or `custom`. Script builds expose this as `--model-set` on Linux/macOS and `-ModelSet` on Windows. | `full` |
+| `AUDIOCPP_MODELS` | Comma or semicolon separated model target names when `AUDIOCPP_MODEL_SET=custom`, such as `qwen3_tts,pocket_tts,qwen3_asr`. Script builds expose this as `--models` on Linux/macOS and `-Models` on Windows. | empty |
 
 ## Usage
 
@@ -289,7 +431,8 @@ Useful CLI features:
 - `--help` with `--task` shows task-oriented help
 - `--help` with `--model <path>` and optional `--family <family>` shows model-owned request, session, and load options
 - `--inspect` prints discovered configs, weights, and capabilities
-- `--list-loaders` prints registered model families
+- `--list-loaders` prints registered model families (`--json` for the machine-readable contract)
+- `python tools/model_manager_v2.py list --json` prints installable packages from `model_specs/*.json`
 - `--batch-text-file <txt>` runs one offline request per non-empty line
 - `--batch-text-dir <dir>` runs one offline request per `.txt`, `.md`, or `.json` file, normalizing each file as one paragraph
 - `--batch-audio-dir <dir>` runs one offline request per `.wav`
@@ -297,6 +440,8 @@ Useful CLI features:
 - `--request-sequence <json>` runs a multi-request offline session
 - `--batch-merge-audio none|concat` controls batch audio merge behavior
 - `--batch-manifest-out <json>` writes a batch output manifest
+- `--metrics` prints compact offline wall time, audio duration, RTF, realtime speed, sample rate, and channel metrics
+- Use `--request-sequence <json> --metrics` for per-request metrics from one long-lived offline session
 - `--pipeline <json>` runs a workflow instead of a raw task
 - `--list-pipelines` prints registered workflows
 - `--workflow-input key=value` overrides pipeline inputs
@@ -305,155 +450,6 @@ Useful CLI features:
 - `--segments-out`, `--turns-out`, and `--words-out` write structured JSON outputs
 - `--vad-chunks-out` writes offline VAD-based chunk windows; tune them with `--vad-chunk-max-seconds`, `--vad-chunk-merge-gap-seconds`, and `--vad-chunk-padding-seconds`
 
-### Pipelines
-
-Pipelines are an experimental JSON workflow feature for chaining multiple model and audio-processing steps behind one CLI command. A pipeline can define default inputs, let users override them with `--workflow-input key=value`, split long media into model-sized chunks, merge text or audio outputs back together, write intermediate artifacts under `--out-dir`, and copy the declared `final_audio` to `--out`.
-
-This is the higher-level layer for production-style audio jobs: redubbing, batch cleanup, long-form narration, voice conversion, source-separation workflows, transcription-plus-alignment, and future workflows that combine translation, diarization, denoise, enhancement, or review steps as those model surfaces are wired into the framework.
-
-The included same-language speech redub pipeline transcribes long speech in chunks with Qwen3 ASR, merges the transcript, then regenerates the speech in a target reference voice with Qwen3 TTS. The default test input `assets/resources/speech.wav` is about 418 seconds long and was generated from an 8,091-character speech text, so it exercises long-audio split and merge behavior rather than a short one-shot request:
-
-```bash
-build/bin/audiocpp_cli \
-  --pipeline assets/pipeline/speech_redub.json \
-  --backend cuda \
-  --out-dir build/out/speech_redub_pipeline \
-  --out build/out/speech_redub_pipeline.wav
-```
-
-Override the source speech or target voice without editing the JSON:
-
-```bash
-build/bin/audiocpp_cli \
-  --pipeline assets/pipeline/speech_redub.json \
-  --backend cuda \
-  --workflow-input source_audio=/path/to/speech.wav \
-  --workflow-input target_voice=/path/to/voice.wav \
-  --workflow-input language=English \
-  --out-dir build/out/speech_redub_pipeline \
-  --out build/out/speech_redub_pipeline.wav
-```
-
-### Tools / Model Manager
-
-The repository also ships a model manager at `tools/model_manager.py` for downloading supported model packages into the framework expected `models/` layout.
-
-Some models also have GGUF packages available. Current GGUF repositories include [audio-cpp/audio.cpp-gguf](https://huggingface.co/audio-cpp/audio.cpp-gguf) and [mirek190/audio.cpp](https://huggingface.co/mirek190/audio.cpp). See [docs/gguf.md](docs/gguf.md) for GGUF support status. A dedicated GGUF model-management tool is under development.
-
-Dependencies:
-
-- Python 3
-- `torch`
-- `safetensors`
-- `PyYAML`
-- network access to the upstream model sources
-
-The tool supports three main commands:
-
-- `list` shows the available package ids
-- `list --json` prints a machine-readable package catalog
-- `info` shows the target layout, required files, and install source for one package
-- `info <package> --json` prints machine-readable package details
-- `install` downloads or converts one package into a models root
-
-The CLI also exposes the runtime loader catalog with `audiocpp_cli --list-loaders --json`, including task and endpoint metadata added by [PR #74](https://github.com/0xShug0/audio.cpp/pull/74).
-
-Recommended top-level install packages:
-
-`Yes` means Hugging Face has a ready-to-use repo that the framework can download as-is. `No` means the tool must assemble, convert, or post-process files before the framework can use them.
-
-| Package id | Model | HF ready-to-use repo |
-|---|---|---|
-| `ace_step` | ACE-Step 1.5 Turbo/Base | No |
-| `chatterbox` | Chatterbox | **Yes** |
-| `citrinet_asr` | Citrinet ASR converted layout | No |
-| `heartmula` | HeartMuLa | No |
-| `higgs_audio_stt` | Higgs Audio STT | No |
-| `higgs_audio_v3_tts_4b` | Higgs Audio v3 TTS 4B | **Yes** |
-| `htdemucs` | HTDemucs | No |
-| `hviske_asr` | Hviske ASR | **Yes** |
-| `irodori_tts_500m_v3` | Irodori-TTS 500M v3 | No |
-| `irodori_tts_600m_v3_voice_design` | Irodori-TTS 600M v3 VoiceDesign | No |
-| `kokoro_82m_bf16` | Kokoro 82M bf16 | **Yes** |
-| `marblenet_vad` | MarbleNet VAD converted layout | No |
-| `mel_band_roformer` | Mel-Band RoFormer MLX | **Yes** |
-| `miocodec_25hz_44k_v2` | MioCodec 25Hz 44.1kHz v2 | No |
-| `miotts_1_7b` | MioTTS 1.7B | No |
-| `moss_audio_tokenizer_nano` | MOSS Audio Tokenizer Nano | No |
-| `moss_audio_tokenizer_v2` | MOSS Audio Tokenizer v2 | No |
-| `moss_tts_nano_100m` | MOSS-TTS-Nano 100M | No |
-| `moss_tts_nano_100m_model` | MOSS-TTS-Nano 100M model subcomponent | No |
-| `moss_tts_local_v1_5` | MOSS-TTS-Local Transformer v1.5 | No |
-| `nemotron_asr` | Nemotron ASR | **Yes** |
-| `omnivoice` | OmniVoice | **Yes** |
-| `parakeet_tdt_0_6b_v3` | Parakeet TDT 0.6B v3 | **Yes** |
-| `pocket_tts` | PocketTTS | **Yes** |
-| `qwen3_asr_0_6b` | Qwen3 ASR 0.6B | **Yes** |
-| `qwen3_asr_1_7b_hf` | Qwen3 ASR 1.7B HF | **Yes** |
-| `qwen3_forced_aligner_0_6b` | Qwen3 Forced Aligner 0.6B | **Yes** |
-| `qwen3_tts_0_6b_base` | Qwen3 TTS 12Hz 0.6B Base | **Yes** |
-| `qwen3_tts_1_7b_base` | Qwen3 TTS 12Hz 1.7B Base | **Yes** |
-| `qwen3_tts_1_7b_custom_voice` | Qwen3 TTS 12Hz 1.7B Custom Voice | **Yes** |
-| `qwen3_tts_1_7b_voice_design` | Qwen3 TTS 12Hz 1.7B Voice Design | **Yes** |
-| `seed_vc` | SeedVC-MLX | **Yes** |
-| `sortformer_diar_4spk_v1` | Sortformer diarization 4 speaker v1 | **Yes** |
-| `stable_audio_3_medium` | Stable Audio 3 Medium | **Yes** |
-| `stable_audio_3_small_music` | Stable Audio 3 Small Music | **Yes** |
-| `stable_audio_3_small_sfx` | Stable Audio 3 Small SFX | **Yes** |
-| `supertonic_3` | Supertonic 3 | **Yes** |
-| `vevo2` | Vevo2 | No |
-| `vibevoice_1_5b` | VibeVoice 1.5B | No |
-| `vibevoice_7b` | VibeVoice 7B | No |
-| `vibevoice_asr` | VibeVoice ASR | No |
-| `voxtral_realtime` | Voxtral Mini 4B Realtime | **Yes** |
-| `voxcpm2` | VoxCPM2 | No |
-
-> [!WARNING]
-> PocketTTS is hosted in a gated Hugging Face repo, so the model manager needs a Hugging Face token with access to `kyutai/pocket-tts`. It currently downloads only the English model and the built-in `alba` voice.
-
-> [!TIP]
-> If you already have the VibeVoice Hugging Face model directory, you do not need to redownload the tokenizer files. Copy `tokenizer.json`, `tokenizer_config.json`, `vocab.json`, and `merges.txt` from `assets/model_manager/vibevoice_1_5b/` into `VibeVoice-1.5B/`, `VibeVoice-7B/`, or `VibeVoice-ASR/`.
-
-Examples:
-
-List packages:
-
-```bash
-python3 tools/model_manager.py list
-```
-
-Show one package:
-
-```bash
-python3 tools/model_manager.py info qwen3_tts_1_7b_base
-```
-
-Install one package into the default `models/` directory:
-
-```bash
-python3 tools/model_manager.py install qwen3_tts_1_7b_base
-```
-
-Install into a custom models root:
-
-```bash
-python3 tools/model_manager.py install vevo2 --models-root /path/to/models
-```
-
-Replace an existing installed package:
-
-```bash
-python3 tools/model_manager.py install pocket_tts --overwrite
-```
-
-Some packages are direct snapshots, while others are composite installs or local-file utilities. Use `info` first when you want to inspect the expected target directory, required files, or whether a package needs extra local source inputs such as `--source-file` or `--source-dir`.
-
-Run a local-file utility:
-
-```bash
-python3 tools/model_manager.py info voxcpm2_audiovae
-python3 tools/model_manager.py install voxcpm2_audiovae --source-file models/VoxCPM2/audiovae.pth --models-root models --overwrite
-```
 
 ### Server
 
@@ -508,7 +504,7 @@ JSON
 
 Set `"lazy_load": true` to register configured model ids at startup while loading each model only on first use. Use per-model `"lazy": true` or `"lazy": false` to override that default.
 
-Set top-level `"backend"` to `"cuda"`, `"cpu"`, `"vulkan"`, or `"metal"`. CUDA is the optimized path for audio.cpp; CPU, Vulkan, and Metal are intended for portability and testing when the binary is built with that backend, but performance and model coverage may be lower.
+Set top-level `"backend"` to `"cuda"`, `"cpu"`, `"vulkan"`, `"metal"`, or `"hip"`. CUDA is the optimized path for audio.cpp; CPU, Vulkan, Metal, and HIP are intended for portability and testing when the binary is built with that backend, but performance and model coverage may be lower.
 
 > [!WARNING]
 > Lazy loading does not unload models after a request. Once a model is first used, the server keeps that model and session in memory for reuse until the server exits.
@@ -529,6 +525,37 @@ The server exposes:
 
 More server examples are in [app/server/README.md](app/server/README.md).
 
+
+### Pipelines
+
+Pipelines are an experimental JSON workflow feature for chaining multiple model and audio-processing steps behind one CLI command. A pipeline can define default inputs, let users override them with `--workflow-input key=value`, split long media into model-sized chunks, merge text or audio outputs back together, write intermediate artifacts under `--out-dir`, and copy the declared `final_audio` to `--out`.
+
+This is the higher-level layer for production-style audio jobs: redubbing, batch cleanup, long-form narration, voice conversion, source-separation workflows, transcription-plus-alignment, and future workflows that combine translation, diarization, denoise, enhancement, or review steps as those model surfaces are wired into the framework.
+
+The included same-language speech redub pipeline transcribes long speech in chunks with Qwen3 ASR, merges the transcript, then regenerates the speech in a target reference voice with Qwen3 TTS. The default test input `assets/resources/speech.wav` is about 418 seconds long and was generated from an 8,091-character speech text, so it exercises long-audio split and merge behavior rather than a short one-shot request:
+
+```bash
+build/bin/audiocpp_cli \
+  --pipeline assets/pipeline/speech_redub.json \
+  --backend cuda \
+  --out-dir build/out/speech_redub_pipeline \
+  --out build/out/speech_redub_pipeline.wav
+```
+
+Override the source speech or target voice without editing the JSON:
+
+```bash
+build/bin/audiocpp_cli \
+  --pipeline assets/pipeline/speech_redub.json \
+  --backend cuda \
+  --workflow-input source_audio=/path/to/speech.wav \
+  --workflow-input target_voice=/path/to/voice.wav \
+  --workflow-input language=English \
+  --out-dir build/out/speech_redub_pipeline \
+  --out build/out/speech_redub_pipeline.wav
+```
+
+
 ## Tests
 
 The repository includes both framework-level parity validation and app-level end-to-end path checks. At a high level, the flow is:
@@ -545,9 +572,14 @@ The Python-reference side of these tests usually requires more time-consuming se
 
 ## Projects
 
+Last update: 2026-07-08
+
+Have a project using audio.cpp? Submit a PR or let me know, and I’ll be happy to add it here.
+
 - [TranscrIA](https://github.com/Martossien/transcria) is a self-hosted meeting transcription platform with diarization and local LLM correction. audio.cpp is integrated as a first-class STT engine in the product.
 - [Pocket TTS Browser Engine](https://github.com/jjmlovesgit/pocket-tts-browser-engine) uses audio.cpp to bring fully local PocketTTS voices into Chrome and Edge through the browser TTS API.
 - [GuideAnts](https://github.com/Elumenotion/GuideAnts) uses audio.cpp as the default local AI stack path for basic ASR and TTS, with planned reusable skills for audio.cpp scenarios and model configurations.
+
 
 ## Performance Metrics
 
@@ -558,7 +590,7 @@ All performance metrics in this section were measured on Ubuntu with the CUDA ba
 
 **Absolute RTF depends on the GPU and system setup, but the Python-relative speedups are real because audio.cpp and the matching Python reference paths were measured on the same CUDA setup.**
 
-audio.cpp already shows some genuinely exciting wins against the matching Python reference paths, especially on the TTS side, even when using the original model weights without quantization. The headline win is wall time: several TTS paths run **1.8x-5.0x faster** than Python while cutting end-to-end latency by **45%-80%**.
+audio.cpp already shows some genuinely exciting wins against the matching Python reference paths, especially on the TTS side, even when using the original model weights without quantization. The headline win is wall time: several TTS paths run **1.8x to up to 10x faster** than Python while cutting end-to-end latency by **45%-90%**.
 
 - In one-shot runs, several TTS-family models already land far ahead of Python:
   - `vevo2`: **5.03x faster** with **80.11% less wall time**
@@ -598,7 +630,6 @@ For TTS-family models, the measured one-shot RTF is:
 | model | audio len (s) | wall time (s) | RTF | x faster than real time |
 |---|---:|---:|---:|---:|
 | chatterbox | 9.72 | 2.45 | 0.252 | 3.97x |
-| kokoro tts | 10.15 | 0.64 | 0.063 | 15.90x |
 | miotts | 20.40 | 3.30 | 0.162 | 6.18x |
 | moss_tts_local | 9.60 | 0.97 | 0.101 | 9.91x |
 | omnivoice | 9.00 | 1.32 | 0.146 | 6.84x |
@@ -613,7 +644,6 @@ For long-form TTS tests, each run uses the same 6,026-character, 1,028-word inpu
 | model | audio len (s) | wall time (s) | RTF | x faster than real time |
 |---|---:|---:|---:|---:|
 | chatterbox | 391.24 | 58.57 | 0.150 | 6.68x |
-| kokoro tts | 371.17 | 7.19 | 0.019 | 51.60x |
 | index tts2 | 422.12 | 139.95 | 0.332 | 3.02x |
 | miotts | 399.16 | 66.59 | 0.167 | 5.99x |
 | moss_tts_nano | 391.20 | 43.16 | 0.110 | 9.06x |
@@ -629,98 +659,13 @@ For long-form TTS tests, each run uses the same 6,026-character, 1,028-word inpu
 
 ## Runtime Memory Options
 
-Some models expose memory-saver session options such as `ace_step.mem_saver=true`, `heartmula.mem_saver=true`, `stable_audio.mem_saver=true`, `omnivoice.mem_saver=true`, and `voxcpm2.mem_saver=true`. These options keep the default output path unchanged while reducing graph workspace VRAM or releasing staged graph/cache state after request phases; later requests may rebuild released graphs.
+Some models expose memory-saver session options such as `ace_step.mem_saver=true`, `dramabox.mem_saver=true`, `heartmula.mem_saver=true`, `stable_audio.mem_saver=true`, `omnivoice.mem_saver=true`, and `voxcpm2.mem_saver=true`. These options keep the default output path unchanged while reducing graph workspace VRAM or releasing staged graph/cache state after request phases; later requests may rebuild released graphs.
 
 ## Precision/Quantization Support
 
 Many model sessions expose quantization through `--session-option <family>.weight_type=<mode>`, and some families also expose more specific knobs such as `...conv_weight_type`, `...talker_weight_type`, or `...speech_decoder_weight_type`. The exact supported modes are model-specific rather than global.
 
-The framework also has a reusable GGUF tensor source and a streaming converter. The
-container reader is shared by all model families; a family still has to list a `.gguf`
-checkpoint as one of its accepted assets because model configuration and tensor naming
-remain architecture-specific. Qwen3 ASR, Qwen3 Forced Aligner, Qwen3 TTS, Nemotron
-3.5 ASR, VibeVoice-ASR, Higgs Audio STT, Hviske ASR, and Citrinet ASR currently accept
-`model.gguf` (including `speech_tokenizer/model.gguf` for TTS). The converter recursively embeds sidecar files
-up to 64 MiB by default using binary-safe metadata, including nested tokenizer models,
-and Qwen3 ASR, Nemotron ASR, VibeVoice-ASR, Higgs Audio STT, Hviske ASR, and Citrinet ASR
-can load the resulting `model.gguf` as a standalone file. The converter embeds the selected
-package spec in new GGUF files. Standalone conversion with embedded sidecars is the default
-and fails if required package resources are missing. Pass `--no-sidecars` only to explicitly
-create a tensor-only container; its package spec is still embedded and validated. A
-`model.safetensors.index.json` is also a first-class tensor source and is merged from
-its routed shards while converting. Exact original tensor ranks are stored separately
-because GGML normally collapses trailing singleton dimensions. Rank-0 safetensors
-scalars are stored physically as one-element GGML tensors while their scalar rank is
-preserved in the exact-shape metadata.
-
-| Format | Package spec source | External model files |
-|---|---|---:|
-| Safetensors | Override, deployment binary, or discovered `model_specs` | Yes |
-| New standalone GGUF | Embedded in GGUF | No |
-| New tensor-only GGUF created with `--no-sidecars` | Embedded in GGUF | Yes, required sidecars |
-| Legacy GGUF without embedded spec | Deployment binary or discovered `model_specs` | Depends on sidecars |
-
-At runtime the order is explicit override, GGUF metadata, compiled deployment spec, then
-external discovery. Configure with `-DAUDIOCPP_DEPLOYMENT_BUILD=ON` to compile the source
-catalog into CLI/server binaries; the option is off by default. For package-layout
-development or testing, the CLI and server can explicitly replace every fallback with
-`--model-spec-override <json-or-directory>`. When a directory is supplied, the runtime
-selects `<directory>/<family>.json`. The server configuration also accepts
-`model_spec_override` globally or per model. An override is trusted runtime input and
-should only point to a spec you control.
-
-```bash
-build/bin/audiocpp_gguf \
-  --input models/Qwen3-ASR-1.7B-hf/model.safetensors \
-  --family qwen3_asr \
-  --output models/Qwen3-ASR-1.7B-hf/model.gguf \
-  --type q8_0
-```
-
-The converter discovers the spec from `--model-spec`, model `config.json`, the model
-root, a discovered external catalog, or its bundled conversion catalog. The converter
-catalog is always embedded in `audiocpp_gguf` even when `AUDIOCPP_DEPLOYMENT_BUILD` is
-off; that option controls the CLI/server fallback catalog. The converter validates the
-requested tensor namespaces and every required GGUF sidecar before writing. Use
-`--allow-missing-model-spec` only for a generic tensor archive that is not intended to be
-loaded by audio.cpp.
-
-Multi-component checkpoints can be packed into one GGUF with repeated namespaced
-inputs. Existing component loaders can open a namespace through
-`open_tensor_source(path, "component")`, which strips that prefix from the view:
-
-```bash
-build/bin/audiocpp_gguf \
-  --input gpt=models/index-tts2-mlx/gpt.safetensors \
-  --input s2mel=models/index-tts2-mlx/s2mel.safetensors \
-  --input bigvgan=models/index-tts2-mlx/bigvgan/model.safetensors \
-  --root models/index-tts2-mlx \
-  --sidecar models/shared/preprocessor_config.json=preprocessor_config.json \
-  --output models/index-tts2-mlx-GGUF/model.gguf \
-  --type q8_0
-```
-
-`--root` selects the directory whose non-weight sidecars are embedded. Repeat
-`--sidecar source=destination` for required assets outside that root, or to remap an
-asset such as Higgs Audio STT's shared Whisper `preprocessor_config.json` into the
-standalone model root. For Higgs, that external Whisper file is needed only during GGUF
-creation; it is not required when loading the completed standalone GGUF.
-
-Packing is a container feature; it does not by itself wire every model loader to the new
-layout. The packed IndexTTS-2 MLX checkpoint has been conversion-tested, including its
-CAMPPlus rank-0 counters, but the existing IndexTTS-2 runtime still has to open and consume
-the corresponding namespaces before audio.cpp can synthesize directly from that file.
-
-Supported conversion types are `f16`, `q8_0`, `q2_k`, `q3_k`, `q4_k`, `q5_k`, and
-`q6_k`. Quantized GGUF files use mixed precision: projection matrices are quantized,
-while embedding/codebook lookup tables and unsupported shapes retain a backend-safe
-type. If both files exist, Qwen loaders prefer `model.gguf` over `model.safetensors`.
-
-Example:
-
-```bash
-build/bin/audiocpp_cli --task tts --family qwen3_tts --model /path/to/model --session-option qwen3_tts.weight_type=q8_0
-```
+audio.cpp also supports standalone GGUF packages. 
 
 In practice, lower precision and quantized modes should be treated as model- and route-specific optimizations rather than universally safe defaults.
 

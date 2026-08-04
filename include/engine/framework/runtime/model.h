@@ -9,8 +9,8 @@
 #include <unordered_map>
 #include <vector>
 
-namespace engine::assets {
-enum class ModelPackageResourceKind;
+namespace engine::model_spec {
+enum class ResourceKind;
 }
 
 namespace engine::runtime {
@@ -45,6 +45,10 @@ struct CliOptionInfo {
     std::string name;
     std::string value_name;
     std::string description;
+    bool required = false;
+    std::optional<std::string> default_value = std::nullopt;
+    std::optional<std::string> min_value = std::nullopt;
+    std::optional<std::string> max_value = std::nullopt;
 };
 
 struct ModelCliInterface {
@@ -78,7 +82,7 @@ std::vector<NamedAsset> discover_named_assets(
 std::vector<NamedAsset> discover_named_assets_from_package_spec(
     const std::filesystem::path & model_path,
     const std::filesystem::path & spec_path,
-    engine::assets::ModelPackageResourceKind kind);
+    engine::model_spec::ResourceKind kind);
 
 const NamedAsset * find_named_asset(
     const std::vector<NamedAsset> & assets,

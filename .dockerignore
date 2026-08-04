@@ -5,5 +5,7 @@ examples/
 scripts/
 docs/
 tools/
+!tools/gguf_convert.cpp
 build/
+model_specs_v1/
 *.md

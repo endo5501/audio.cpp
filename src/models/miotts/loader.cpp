@@ -1,6 +1,6 @@
 #include "engine/models/miotts/loader.h"
 
-#include "engine/framework/assets/model_package.h"
+#include "engine/framework/model_spec/package.h"
 #include "engine/models/miotts/session.h"
 
 #include <stdexcept>
@@ -27,6 +27,25 @@ runtime::CapabilitySet capabilities(const MioTTSAssets &) {
     return out;
 }
 
+runtime::ModelCliInterface cli(const MioTTSAssets &) {
+    runtime::ModelCliInterface out;
+    out.request_options = {
+        {"miotts.best_of_n", "n", "Generate n candidates for this request and select by ASR scoring."},
+        {"miotts.best_of_n_enabled", "true|false", "Enable best-of-N candidate selection for this request."},
+        {"miotts.best_of_n_language", "auto|en|ja", "Language used when scoring best-of-N candidates."},
+    };
+    out.session_options = {
+        {"miotts.codec_model_path", "dir", "MioCodec model directory used by MioTTS acoustic decoding."},
+        {"miotts.best_of_n_enabled", "true|false", "Enable best-of-N candidate selection by default."},
+        {"miotts.best_of_n_default", "n", "Default best-of-N candidate count."},
+        {"miotts.best_of_n_max", "n", "Maximum best-of-N candidate count."},
+        {"miotts.best_of_n_language", "auto|en|ja", "Default language used when scoring best-of-N candidates."},
+        {"miotts.best_of_n_asr_model_path", "dir", "Qwen3-ASR model directory used by best-of-N scoring."},
+        {"miotts.weight_type", "native|f32|f16|bf16|q8_0", "MioTTS language-model matmul weight storage type."},
+    };
+    return out;
+}
+
 class MioTTSLoader final : public runtime::IVoiceModelLoader {
 public:
     std::string family() const override {
@@ -48,9 +67,9 @@ public:
             return false;
         }
         try {
-            (void) engine::assets::load_resource_bundle_from_package_spec(
+            (void) engine::model_spec::load_resource_bundle(
                 request.model_path,
-                engine::assets::default_model_package_spec_path(family()));
+                engine::model_spec::default_spec_path(family()));
             return true;
         } catch (...) {
             return false;
@@ -63,15 +82,16 @@ public:
         inspection.model_root = assets->resources.model_root();
         inspection.metadata = metadata(*assets);
         inspection.capabilities = capabilities(*assets);
-        const auto spec_path = engine::assets::default_model_package_spec_path(family());
+        inspection.cli = cli(*assets);
+        const auto spec_path = engine::model_spec::default_spec_path(family());
         inspection.discovered_configs = runtime::discover_named_assets_from_package_spec(
             request.model_path,
             spec_path,
-            engine::assets::ModelPackageResourceKind::Files);
+            engine::model_spec::ResourceKind::Files);
         inspection.discovered_weights = runtime::discover_named_assets_from_package_spec(
             request.model_path,
             spec_path,
-            engine::assets::ModelPackageResourceKind::Tensors);
+            engine::model_spec::ResourceKind::Tensors);
         return inspection;
     }
 

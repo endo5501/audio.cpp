@@ -21,6 +21,24 @@ namespace {
 
 constexpr int64_t kDefaultTextChunkSize = 128;
 
+void release_tensor_storage(const ChatterboxAssets & assets) {
+    if (assets.voice_encoder_weights != nullptr) {
+        assets.voice_encoder_weights->release_storage();
+    }
+    if (assets.s3gen_weights != nullptr) {
+        assets.s3gen_weights->release_storage();
+    }
+    if (assets.t3_english_weights != nullptr) {
+        assets.t3_english_weights->release_storage();
+    }
+    if (assets.t3_multilingual_v2_weights != nullptr) {
+        assets.t3_multilingual_v2_weights->release_storage();
+    }
+    if (assets.t3_multilingual_v3_weights != nullptr) {
+        assets.t3_multilingual_v3_weights->release_storage();
+    }
+}
+
 ChatterboxVoiceCloneConfig make_voice_clone_config(
     const std::unordered_map<std::string, std::string> & options) {
     ChatterboxVoiceCloneConfig config;
@@ -133,83 +151,104 @@ ChatterboxPromptPrepConfig make_prompt_prep_config(const runtime::SessionOptions
 }
 
 std::unique_ptr<ChatterboxTtsComponent> make_chatterbox_component_for_language(
-    const ChatterboxAssetPaths & assets,
+    const ChatterboxAssets & assets,
     const runtime::SessionOptions & options,
     const engine::core::ExecutionContext & execution_context,
     engine::assets::TensorStorageType t3_weight_storage_type,
     engine::assets::TensorStorageType component_weight_storage_type,
+    ChatterboxMultilingualT3Version multilingual_t3_version,
     bool mem_saver,
     const std::string & language) {
-    require_chatterbox_tts_assets(assets);
     const bool use_multilingual = chatterbox_language_uses_multilingual_t3(language);
+    const auto & t3_source = use_multilingual
+        ? (multilingual_t3_version == ChatterboxMultilingualT3Version::V3
+               ? *assets.t3_multilingual_v3_weights
+               : *assets.t3_multilingual_v2_weights)
+        : *assets.t3_english_weights;
+    auto t3_weights = load_t3_inference_weights(
+        t3_source,
+        execution_context,
+        t3_weight_storage_type,
+        false);
+    auto tokenizer = load_chatterbox_english_tokenizer(
+        use_multilingual
+            ? assets.resources.require_file("multilingual_tokenizer")
+            : assets.resources.require_file("english_tokenizer"));
+    auto voice_encoder = VoiceEncoderComponent::load_from_source(*assets.voice_encoder_weights, options.backend);
+    auto s3_tokenizer = S3TokenizerComponent::load_from_source(
+        *assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    auto flow_encoder = load_s3_flow_encoder_weights(
+        *assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    auto flow_decoder = load_s3_flow_decoder_weights(
+        *assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    auto hift = HiFTVocoderComponent::load_from_source(
+        assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    auto campplus_encoder = CAMPPlusEncoderComponent::load_from_source(
+        assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    release_tensor_storage(assets);
     return std::make_unique<ChatterboxTtsComponent>(
-        load_t3_inference_weights(
-            use_multilingual ? assets.t3_multilingual_v2_weights : assets.t3_english_weights,
-            execution_context,
-            t3_weight_storage_type,
-            false),
-        load_chatterbox_english_tokenizer(
-            use_multilingual ? assets.multilingual_tokenizer : assets.english_tokenizer),
-        VoiceEncoderComponent::load_from_model_root(assets.model_root, options.backend),
-        S3TokenizerComponent::load_from_checkpoint(
-            assets.s3tokenizer_weights,
-            execution_context,
-            component_weight_storage_type),
-        CAMPPlusEncoderComponent::load_from_checkpoint(
-            assets.s3gen_weights,
-            execution_context,
-            component_weight_storage_type),
-        load_s3_flow_encoder_weights(
-            assets.s3gen_weights,
-            execution_context,
-            component_weight_storage_type),
-        load_s3_flow_decoder_weights(
-            assets.s3gen_weights,
-            execution_context,
-            component_weight_storage_type),
-        HiFTVocoderComponent::load_from_checkpoint(
-            assets.s3gen_weights,
-            execution_context,
-            component_weight_storage_type),
+        std::move(t3_weights),
+        std::move(tokenizer),
+        std::move(voice_encoder),
+        std::move(s3_tokenizer),
+        std::move(campplus_encoder),
+        std::move(flow_encoder),
+        std::move(flow_decoder),
+        std::move(hift),
         make_prompt_prep_config(options),
         execution_context,
         mem_saver);
 }
 
 std::unique_ptr<ChatterboxVcComponent> make_chatterbox_vc_component(
-    const ChatterboxAssetPaths & assets,
+    const ChatterboxAssets & assets,
     const runtime::SessionOptions & options,
     const engine::core::ExecutionContext & execution_context,
     engine::assets::TensorStorageType component_weight_storage_type,
     bool mem_saver) {
-    require_chatterbox_vc_assets(assets);
+    auto s3_tokenizer = S3TokenizerComponent::load_from_source(
+        *assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    auto flow_encoder = load_s3_flow_encoder_weights(
+        *assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    auto flow_decoder = load_s3_flow_decoder_weights(
+        *assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    auto hift = HiFTVocoderComponent::load_from_source(
+        assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    auto campplus_encoder = CAMPPlusEncoderComponent::load_from_source(
+        assets.s3gen_weights,
+        execution_context,
+        component_weight_storage_type);
+    release_tensor_storage(assets);
     return std::make_unique<ChatterboxVcComponent>(
-        S3TokenizerComponent::load_from_checkpoint(
-            assets.s3tokenizer_weights,
-            execution_context,
-            component_weight_storage_type),
-        CAMPPlusEncoderComponent::load_from_checkpoint(
-            assets.s3gen_weights,
-            execution_context,
-            component_weight_storage_type),
-        load_s3_flow_encoder_weights(
-            assets.s3gen_weights,
-            execution_context,
-            component_weight_storage_type),
-        load_s3_flow_decoder_weights(
-            assets.s3gen_weights,
-            execution_context,
-            component_weight_storage_type),
-        HiFTVocoderComponent::load_from_checkpoint(
-            assets.s3gen_weights,
-            execution_context,
-            component_weight_storage_type),
+        std::move(s3_tokenizer),
+        std::move(campplus_encoder),
+        std::move(flow_encoder),
+        std::move(flow_decoder),
+        std::move(hift),
         make_prompt_prep_config(options),
         execution_context,
         mem_saver);
 }
 
-std::shared_ptr<const ChatterboxAssetPaths> require_assets(std::shared_ptr<const ChatterboxAssetPaths> assets) {
+std::shared_ptr<const ChatterboxAssets> require_assets(std::shared_ptr<const ChatterboxAssets> assets) {
     if (assets == nullptr) {
         throw std::runtime_error("Chatterbox session requires assets");
     }
@@ -243,6 +282,7 @@ void validate_chatterbox_options(const runtime::SessionOptions & options) {
         if (key.rfind("chatterbox.", 0) == 0 &&
             key != "chatterbox.weight_type" &&
             key != "chatterbox.t3_weight_type" &&
+            key != "chatterbox.multilingual_t3" &&
             key != "chatterbox.conditionals_cache_slots" &&
             key != "chatterbox.mem_saver" &&
             key != "chatterbox.encoder_condition_samples" &&
@@ -270,6 +310,18 @@ engine::assets::TensorStorageType resolve_component_weight_storage_type(const ru
         engine::assets::TensorStorageType::Native);
     validate_chatterbox_weight_storage(storage_type, "chatterbox.weight_type");
     return storage_type;
+}
+
+ChatterboxMultilingualT3Version resolve_multilingual_t3_version(const runtime::SessionOptions & options) {
+    const auto value = runtime::find_option(options.options, {"chatterbox.multilingual_t3", "multilingual_t3"})
+                           .value_or("v2");
+    if (value == "v2") {
+        return ChatterboxMultilingualT3Version::V2;
+    }
+    if (value == "v3") {
+        return ChatterboxMultilingualT3Version::V3;
+    }
+    throw std::runtime_error("chatterbox.multilingual_t3 must be v2 or v3");
 }
 
 std::size_t resolve_conditionals_cache_slots(const runtime::SessionOptions & options) {
@@ -307,12 +359,13 @@ bool ChatterboxConditionalsCacheKeyEqual::operator()(
 ChatterboxSession::ChatterboxSession(
     runtime::TaskSpec task,
     runtime::SessionOptions options,
-    std::shared_ptr<const ChatterboxAssetPaths> assets)
+    std::shared_ptr<const ChatterboxAssets> assets)
     : RuntimeSessionBase(options),
       task_(std::move(task)),
       assets_(require_assets(std::move(assets))),
       t3_weight_storage_type_(resolve_t3_weight_storage_type(this->options())),
       component_weight_storage_type_(resolve_component_weight_storage_type(this->options())),
+      multilingual_t3_version_(resolve_multilingual_t3_version(this->options())),
       mem_saver_(resolve_mem_saver(this->options())),
       conditionals_cache_(resolve_conditionals_cache_slots(this->options())) {
     if (task_.task != runtime::VoiceTaskKind::VoiceCloning &&
@@ -368,6 +421,7 @@ void ChatterboxSession::prepare(const runtime::SessionPreparationRequest & reque
             execution_context(),
             t3_weight_storage_type_,
             component_weight_storage_type_,
+            multilingual_t3_version_,
             mem_saver_,
             session_config.language);
         component_language_ = session_config.language;
