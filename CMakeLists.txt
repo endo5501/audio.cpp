@@ -198,6 +198,7 @@ function(audiocpp_configure_runtime_object target_name)
         ${CMAKE_CURRENT_SOURCE_DIR}/external/llama_tokenizer
         ${CMAKE_CURRENT_SOURCE_DIR}/external/cJSON
         ${CMAKE_CURRENT_SOURCE_DIR}/external/libyaml/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/minimp3
     )
     target_compile_definitions(${target_name} PRIVATE ${AUDIOCPP_LIBYAML_COMPILE_DEFINITIONS})
     target_link_libraries(${target_name} PRIVATE ggml sentencepiece)
@@ -1163,7 +1164,6 @@ target_include_directories(engine_runtime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/g
 target_include_directories(engine_runtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/external/sentencepiece/src
     ${CMAKE_CURRENT_SOURCE_DIR}/external/llama_tokenizer
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/minimp3
 )
 
 target_link_libraries(engine_runtime PUBLIC ggml)
@@ -1476,12 +1476,25 @@ if (ENGINE_BUILD_TESTS)
         COMMAND audio_reader_test
     )
 
-    add_engine_unittest(wav_reader_chunk_bounds_test tests/unittests/test_wav_reader_chunk_bounds.cpp)
-
-    add_test(
-        NAME wav_reader_chunk_bounds_test
-        COMMAND wav_reader_chunk_bounds_test
-    )
+    # NovelViewer fork: upstream's wav_reader_chunk_bounds_test is deliberately
+    # NOT registered here. It asserts that a data chunk claiming more than the
+    # file holds must be REJECTED; this fork deliberately salvages it instead.
+    #
+    # The two are not a test-detail mismatch, they are opposite contracts on the
+    # same input. A streaming writer that never patches its header leaves data
+    # claiming 0xFFFFFFFF with a payload that genuinely runs to EOF, and that
+    # payload is real audio a user handed us as a voice reference. Rejecting it
+    # would break reference audio that works today (see 9c9a504, eda8e83).
+    #
+    # Upstream's security goal is met either way: this fork clamps the declared
+    # size to remaining_bytes() BEFORE allocating, so a 4 GiB claim on a small
+    # file never over-allocates at all. Nothing is traded away by not rejecting.
+    #
+    # Coverage is not lost: tests/unittests/test_wav_reader.cpp exercises the
+    # same 0xFFFFFFFF claim (test_unpatched_streaming_size_reads_to_eof) plus
+    # the debris-trailed and truncated-EXTENSIBLE shapes this fork must handle.
+    #
+    # The upstream source file is left untouched so it keeps merging cleanly.
 
     add_engine_unittest(hf_tokenizer_vocab_bounds_test tests/unittests/test_hf_tokenizer_vocab_bounds.cpp)
 
