@@ -80,6 +80,27 @@ AUDIOCPP_API int audiocpp_synthesize(audiocpp_ctx *ctx, const char *text,
                                      float caption_guidance_scale,
                                      int num_inference_steps);
 
+// audiocpp_synthesize plus arbitrary engine request options, as parallel
+// key/value arrays of `option_count` entries. `option_count` may be 0, which
+// makes this exactly audiocpp_synthesize; that is how audiocpp_synthesize is
+// implemented, so the two share one code path.
+//
+// Options are passed to the engine verbatim and validated against the model
+// contract, so an unknown key or an out-of-range value fails with a message
+// from audiocpp_get_error(ctx) rather than being silently ignored. Keys given
+// here win over the dedicated guidance/step arguments above.
+//
+// This is the extension point for engine options that do not deserve their own
+// parameter -- notably duration_correction, which bounds the generated length
+// to roughly what the text needs so the model has no surplus to fill with an
+// unrequested phrase. See docs/models/irodori_tts.md for the option list.
+AUDIOCPP_API int audiocpp_synthesize_with_options(
+    audiocpp_ctx *ctx, const char *text, const char *ref_wav_path,
+    const char *caption, float speaker_guidance_scale,
+    float caption_guidance_scale, int num_inference_steps,
+    const char *const *option_keys, const char *const *option_values,
+    int option_count);
+
 // Result access (valid until the next synthesize call or audiocpp_free).
 AUDIOCPP_API const float *audiocpp_get_audio(const audiocpp_ctx *ctx);
 AUDIOCPP_API int audiocpp_get_audio_length(const audiocpp_ctx *ctx);

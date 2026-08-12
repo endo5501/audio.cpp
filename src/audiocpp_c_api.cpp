@@ -386,7 +386,25 @@ int audiocpp_synthesize(audiocpp_ctx *ctx, const char *text,
                         const char *ref_wav_path, const char *caption,
                         float speaker_guidance_scale,
                         float caption_guidance_scale, int num_inference_steps) {
+  return audiocpp_synthesize_with_options(
+      ctx, text, ref_wav_path, caption, speaker_guidance_scale,
+      caption_guidance_scale, num_inference_steps, nullptr, nullptr, 0);
+}
+
+int audiocpp_synthesize_with_options(
+    audiocpp_ctx *ctx, const char *text, const char *ref_wav_path,
+    const char *caption, float speaker_guidance_scale,
+    float caption_guidance_scale, int num_inference_steps,
+    const char *const *option_keys, const char *const *option_values,
+    int option_count) {
   if (ctx == nullptr) {
+    return -1;
+  }
+  if (option_count < 0 ||
+      (option_count > 0 &&
+       (option_keys == nullptr || option_values == nullptr))) {
+    ctx->last_error = "Irodori-TTS option arrays are null or the count is "
+                      "negative";
     return -1;
   }
   if (ctx->offline == nullptr || text == nullptr) {
@@ -414,6 +432,18 @@ int audiocpp_synthesize(audiocpp_ctx *ctx, const char *text,
     if (num_inference_steps > 0) {
       request.options["num_inference_steps"] =
           std::to_string(num_inference_steps);
+    }
+    // Applied last so an explicit option wins over the dedicated arguments.
+    for (int i = 0; i < option_count; ++i) {
+      const char *key = option_keys[i];
+      const char *value = option_values[i];
+      if (key == nullptr || key[0] == '\0' || value == nullptr) {
+        ctx->last_error =
+            "Irodori-TTS request option " + std::to_string(i) +
+            " has a null or empty key, or a null value";
+        return -1;
+      }
+      request.options[std::string(key)] = std::string(value);
     }
     if (ref_wav_path != nullptr && ref_wav_path[0] != '\0') {
       const std::string ref_key(ref_wav_path);
