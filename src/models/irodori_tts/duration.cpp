@@ -127,7 +127,78 @@ int count_annotation_emojis(const std::string & text) {
     return count;
 }
 
+// Punctuation shapes the prosody but is not itself spoken, so it is excluded
+// from the character-rule count. Everything not listed here counts as speech,
+// which keeps unfamiliar scripts from collapsing the estimate to zero.
+bool is_punctuation(int code) {
+    if (code <= 0x20 || code == 0x7F) {
+        return true;  // ASCII control and space
+    }
+    if ((code >= 0x21 && code <= 0x2F) || (code >= 0x3A && code <= 0x40) ||
+        (code >= 0x5B && code <= 0x60) || (code >= 0x7B && code <= 0x7E)) {
+        return true;  // ASCII punctuation
+    }
+    if (code >= 0x2000 && code <= 0x206F) {
+        return true;  // general punctuation (dashes, ellipsis, quotes)
+    }
+    if (code >= 0x3000 && code <= 0x303F) {
+        return true;  // CJK symbols and punctuation
+    }
+    // Fullwidth and halfwidth forms, minus the fullwidth digits which are read.
+    if ((code >= 0xFF01 && code <= 0xFF0F) || (code >= 0xFF1A && code <= 0xFF20) ||
+        (code >= 0xFF3B && code <= 0xFF40) || (code >= 0xFF5B && code <= 0xFF65)) {
+        return true;
+    }
+    return false;
+}
+
 }  // namespace
+
+int64_t irodori_speech_codepoints(const std::string & text) {
+    int64_t count = 0;
+    for (size_t pos = 0; pos < text.size();) {
+        const int code = utf8_codepoint(text, pos);
+        if (code < 0) {
+            break;
+        }
+        if (!is_punctuation(code)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+float irodori_text_duration_estimate(
+    const std::string & text,
+    const IrodoriDurationCorrection & correction) {
+    const int64_t codepoints = irodori_speech_codepoints(text);
+    if (codepoints <= 0) {
+        return 0.0F;
+    }
+    return static_cast<float>(codepoints) * correction.text_rate + correction.text_margin;
+}
+
+float irodori_corrected_target_seconds(
+    float predicted_seconds,
+    float noref_predicted_seconds,
+    const std::string & text,
+    const IrodoriDurationCorrection & correction) {
+    if (!correction.enabled) {
+        return predicted_seconds;
+    }
+    if (correction.text_rate < 0.0F || correction.text_margin < 0.0F) {
+        throw std::runtime_error("Irodori-TTS duration correction rate and margin must not be negative");
+    }
+    float target = predicted_seconds;
+    if (noref_predicted_seconds > 0.0F) {
+        target = std::min(target, noref_predicted_seconds);
+    }
+    const float text_estimate = irodori_text_duration_estimate(text, correction);
+    if (text_estimate > 0.0F) {
+        target = std::min(target, text_estimate);
+    }
+    return target;
+}
 
 std::vector<float> build_irodori_duration_features(
     const std::string & text,
