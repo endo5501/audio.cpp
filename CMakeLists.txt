@@ -1517,6 +1517,14 @@ if (ENGINE_BUILD_TESTS)
         COMMAND audio_chunking_test
     )
 
+    add_engine_unittest(irodori_duration_policy_test tests/unittests/test_irodori_duration_policy.cpp)
+    target_include_directories(irodori_duration_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unittests)
+
+    add_test(
+        NAME irodori_duration_policy_test
+        COMMAND irodori_duration_policy_test
+    )
+
     add_engine_unittest(inflect_v2_frontend_test tests/unittests/test_inflect_v2_frontend.cpp)
     target_include_directories(inflect_v2_frontend_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unittests)
 
