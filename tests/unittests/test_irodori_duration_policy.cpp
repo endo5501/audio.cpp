@@ -86,6 +86,41 @@ int main() try {
       irodori_corrected_target_seconds(3.00F, 2.50F, u8"、。", enabled), 2.50F,
       0.001F, "punctuation-only text falls back to the predictions");
 
+  // A negative rate or margin would make the character rule the smallest term
+  // and collapse the target, truncating the clip. Reject rather than generate a
+  // silently wrong length.
+  {
+    IrodoriDurationCorrection bad_rate = enabled;
+    bad_rate.text_rate = -0.1F;
+    bool threw = false;
+    try {
+      irodori_corrected_target_seconds(7.96F, 5.56F, medium, bad_rate);
+    } catch (const std::exception &) {
+      threw = true;
+    }
+    engine::test::require(threw, "negative rate must be rejected");
+  }
+  {
+    IrodoriDurationCorrection bad_margin = enabled;
+    bad_margin.text_margin = -1.0F;
+    bool threw = false;
+    try {
+      irodori_corrected_target_seconds(7.96F, 5.56F, medium, bad_margin);
+    } catch (const std::exception &) {
+      threw = true;
+    }
+    engine::test::require(threw, "negative margin must be rejected");
+  }
+
+  // A disabled correction is inert, so it does not validate its parameters.
+  {
+    IrodoriDurationCorrection bad_but_off = disabled;
+    bad_but_off.text_rate = -0.1F;
+    engine::test::require_close(
+        irodori_corrected_target_seconds(7.96F, 5.56F, medium, bad_but_off),
+        7.96F, 0.001F, "disabled ignores its parameters");
+  }
+
   std::cout << "irodori_duration_policy_test passed\n";
   return 0;
 } catch (const std::exception &error) {
