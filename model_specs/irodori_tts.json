@@ -175,6 +175,29 @@
         "description": "Trim trailing silence-like samples; default true.",
         "required": false,
         "default": true
+      },
+      {
+        "name": "duration_correction",
+        "type": "bool",
+        "description": "Bound the generated length to roughly what the text needs, so the model has no surplus to fill with an unrequested phrase. Re-runs the duration predictor without the speaker and caption conditions and caps the result with a character-count estimate. Ignored when duration_sec is set; default false.",
+        "required": false,
+        "default": false
+      },
+      {
+        "name": "duration_correction_rate",
+        "type": "float",
+        "description": "Seconds per spoken codepoint used by duration_correction's character rule; calibrated on Japanese; default 0.207.",
+        "required": false,
+        "min": 0.0,
+        "default": 0.207
+      },
+      {
+        "name": "duration_correction_margin_sec",
+        "type": "float",
+        "description": "Trailing room in seconds left after the text ends by duration_correction's character rule; default 0.4.",
+        "required": false,
+        "min": 0.0,
+        "default": 0.4
       }
     ],
     "session": [

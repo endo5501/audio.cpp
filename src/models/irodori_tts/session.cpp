@@ -7,6 +7,7 @@
 #include "engine/framework/text/chunking.h"
 #include "engine/models/irodori_tts/codec.h"
 #include "engine/models/irodori_tts/condition_encoder.h"
+#include "engine/models/irodori_tts/duration.h"
 #include "engine/models/irodori_tts/rf_dit.h"
 
 #include <algorithm>
@@ -160,6 +161,27 @@ generation_options_from_request(const runtime::TaskRequest &request) {
   }
   if (const auto value = runtime::find_option(request.options, {"trim_tail"})) {
     options.trim_tail = runtime::parse_bool_option(*value, "trim_tail");
+  }
+  if (const auto value =
+          runtime::find_option(request.options, {"duration_correction"})) {
+    options.duration_correction.enabled =
+        runtime::parse_bool_option(*value, "duration_correction");
+  }
+  if (const auto value = runtime::parse_float_option(
+          request.options, {"duration_correction_rate"})) {
+    if (*value < 0.0F) {
+      throw std::runtime_error(
+          "Irodori-TTS duration_correction_rate must not be negative");
+    }
+    options.duration_correction.text_rate = *value;
+  }
+  if (const auto value = runtime::parse_float_option(
+          request.options, {"duration_correction_margin_sec"})) {
+    if (*value < 0.0F) {
+      throw std::runtime_error(
+          "Irodori-TTS duration_correction_margin_sec must not be negative");
+    }
+    options.duration_correction.text_margin = *value;
   }
   return options;
 }
@@ -532,8 +554,18 @@ IrodoriTTSSession::run(const runtime::TaskRequest &request) {
       rf_sampler_->context_graph_rebuilds();
   const int64_t rf_step_graph_rebuilds_before =
       rf_sampler_->step_graph_rebuilds();
+  // Conditions for the duration correction's second predictor pass. Built once
+  // and reused: the correction asks what the predictor would say for this text
+  // alone, so they never depend on the chunk.
+  const IrodoriSpeakerCondition noref_speaker =
+      no_reference_speaker_condition(assets_->config);
+  IrodoriCaptionCondition noref_caption = caption;
+  noref_caption.has_caption = false;
+  std::fill(noref_caption.mask.begin(), noref_caption.mask.end(), 0);
+
   runtime::AudioBuffer merged_audio;
   double condition_ms = 0.0;
+  double noref_condition_ms = 0.0;
   double sample_rf_ms = 0.0;
   double rf_context_cond_ms = 0.0;
   double rf_context_cfg_ms = 0.0;
@@ -564,6 +596,28 @@ IrodoriTTSSession::run(const runtime::TaskRequest &request) {
     const auto conditions = condition_encoder_->run(
         tokenized.token_ids, tokenized.mask, caption, speaker);
     condition_ms += debug::elapsed_ms(condition_start);
+
+    // Second pass with the speaker and caption conditions disabled. The
+    // predictor over-predicts when both are supplied together, and the model
+    // fills the surplus with a phrase that is not in the text. `has_speaker`
+    // and `has_caption` are runtime graph inputs, so this reuses the same
+    // graph -- no rebuild, no reload. Skipped when neither condition is set,
+    // because the two predictions are then identical.
+    float noref_seconds = 0.0F;
+    const bool needs_noref_pass =
+        irodori_request.generation.duration_correction.enabled &&
+        !irodori_request.generation.duration_seconds_specified &&
+        (speaker.has_speaker || caption.has_caption);
+    if (needs_noref_pass) {
+      const auto noref_start = Clock::now();
+      const auto noref_conditions = condition_encoder_->run(
+          tokenized.token_ids, tokenized.mask, noref_caption, noref_speaker);
+      noref_condition_ms += debug::elapsed_ms(noref_start);
+      const float noref_frames =
+          std::expm1(noref_conditions.predicted_log_frames);
+      noref_seconds = noref_frames * static_cast<float>(hop_length) /
+                      static_cast<float>(assets_->codec.sample_rate);
+    }
     if (mem_saver_) {
       condition_encoder_->release_graphs();
     }
@@ -593,8 +647,22 @@ IrodoriTTSSession::run(const runtime::TaskRequest &request) {
       latent_steps = (target_samples + hop_length - 1) / hop_length;
     } else {
       const float pred_frames = std::expm1(conditions.predicted_log_frames);
-      const float scaled_frames =
+      float scaled_frames =
           pred_frames * irodori_request.generation.duration_scale;
+      if (irodori_request.generation.duration_correction.enabled) {
+        const float seconds_per_frame = static_cast<float>(hop_length) /
+                                        static_cast<float>(
+                                            assets_->codec.sample_rate);
+        const float corrected_seconds = irodori_corrected_target_seconds(
+            scaled_frames * seconds_per_frame, noref_seconds,
+            irodori_request.text,
+            irodori_request.generation.duration_correction);
+        scaled_frames = corrected_seconds / seconds_per_frame;
+        debug::trace_log_scalar(
+            "irodori_tts.chunk." + std::to_string(chunk_index) +
+                ".duration_correction_sec",
+            corrected_seconds);
+      }
       const int64_t min_frames =
           std::max<int64_t>(1, static_cast<int64_t>(std::ceil(
                                    irodori_request.generation.min_seconds *
@@ -862,6 +930,10 @@ IrodoriTTSSession::run(const runtime::TaskRequest &request) {
                            debug::elapsed_ms(reference_start, reference_end));
   debug::timing_log_scalar("irodori_tts.tokenize_ms", tokenize_ms);
   debug::timing_log_scalar("irodori_tts.condition_ms", condition_ms);
+  // Reported separately so the correction's added cost is visible against the
+  // condition pass it duplicates.
+  debug::timing_log_scalar("irodori_tts.noref_condition_ms",
+                           noref_condition_ms);
   debug::timing_log_scalar("irodori_tts.sample_rf_ms", sample_rf_ms);
   debug::timing_log_scalar("irodori_tts.sample_rf.context_cond_ms",
                            rf_context_cond_ms);

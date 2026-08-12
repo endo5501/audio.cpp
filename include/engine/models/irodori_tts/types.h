@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/framework/runtime/session.h"
+#include "engine/models/irodori_tts/duration.h"
 
 #include <cstdint>
 #include <string>
@@ -23,6 +24,9 @@ struct IrodoriGenerationOptions {
   float duration_seconds = 0.0F;
   bool duration_seconds_specified = false;
   bool context_kv_cache = true;
+  // Off by default: enabling it changes the generated length, so existing
+  // callers keep their output byte for byte.
+  IrodoriDurationCorrection duration_correction;
   bool trim_tail = true;
   int64_t tail_window_size = 20;
   float tail_std_threshold = 0.05F;
