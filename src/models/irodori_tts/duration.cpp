@@ -141,6 +141,11 @@ bool is_punctuation(int code) {
     if (code >= 0x2000 && code <= 0x206F) {
         return true;  // general punctuation (dashes, ellipsis, quotes)
     }
+    // U+3005 々 (iteration), U+3006 〆 (closing) and U+3007 〇 (ideographic
+    // zero) live in this block but are read aloud, so they stay in the count.
+    if (code == 0x3005 || code == 0x3006 || code == 0x3007) {
+        return false;
+    }
     if (code >= 0x3000 && code <= 0x303F) {
         return true;  // CJK symbols and punctuation
     }

@@ -53,8 +53,9 @@ int main() try {
                            int64_t{9}, "iteration marks are spoken");
   engine::test::require_eq(irodori_speech_codepoints(u8"〆切は〇日"), int64_t{5},
                            "closing mark and ideographic zero are spoken");
+  // は い と are spoken; the brackets, the comma and the full stop are not.
   engine::test::require_eq(irodori_speech_codepoints(u8"「はい」、と。"),
-                           int64_t{2}, "brackets and punctuation are not");
+                           int64_t{3}, "brackets and punctuation are not");
 
   // 29 * 0.207 + 0.4
   engine::test::require_close(irodori_text_duration_estimate(medium, enabled),
