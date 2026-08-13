@@ -14,7 +14,7 @@ The default downloadable package is the GGUF v4 Small Q8_0 checkpoint. v4 Small 
 
 v4 GGUF packages are published in both `q8_0` and `f16`. v3 GGUF packages are also available in `q8_0` and `f16`.
 
-> **v4 reference-conditioning note:** Fresh v4 voice-clone or reference+caption generations may occasionally add a short extra phrase near the end of the clip. This behavior is also reproducible in the upstream Python path with the same reference/text/seed, so it is treated as a current v4 model/runtime limitation rather than a GGUF-only issue. No-reference and caption-only paths are usually cleaner; for reference-conditioned use, try a different seed, caption, or explicit `duration_sec` if the tail matters.
+> **v4 reference-conditioning note:** v4 voice-clone or reference+caption generations may add a short extra phrase near the end of the clip — with a reference *and* a caption together, in 8-9 runs out of 10 rather than occasionally. This behavior is also reproducible in the upstream Python path, so it is a v4 model behaviour rather than a GGUF-only issue. The cause is the duration predictor asking for more time than the text needs; set `duration_correction=true` to bound the length instead (see [Duration correction](#duration-correction)). A different seed does not help — the predicted length is deterministic.
 
 ## Quick Start
 
@@ -90,6 +90,38 @@ v4 uses the normalized schema-v1 option names directly. New requests should use 
 | `guidance_max_t` | float | `1.0` | Maximum diffusion timestep where guidance is active. |
 | `seed` | integer | random | Generation seed. |
 | `trim_tail` | bool | `true` | Trim trailing silence-like samples. |
+| `duration_correction` | bool | `false` | Bound the generated length to roughly what the text needs. See below. |
+| `duration_correction_rate` | float | `0.207` | Seconds per spoken codepoint for the character rule. Japanese calibration. |
+| `duration_correction_margin_sec` | seconds | `0.4` | Trailing room left after the text ends by the character rule. |
+
+### Duration correction
+
+With a reference voice **and** a caption, the v4 duration predictor asks for more
+time than the text needs, and the model fills the surplus with a phrase that is
+not in the input — measured at 8-9 runs in 10, and reproducible in the upstream
+PyTorch path, so it is a model behaviour rather than a GGUF-only issue.
+The surplus is what drives it: at 0.5 s or less it does not occur, at 1.9 s or
+more it almost always does.
+
+`duration_correction=true` bounds the target length to the smallest of
+
+1. the normal prediction,
+2. the prediction re-run with the speaker and caption conditions disabled, and
+3. `codepoints(text, excluding punctuation) * duration_correction_rate + duration_correction_margin_sec`.
+
+Both extra terms are needed. The no-condition prediction is accurate for a
+medium-length sentence but over-predicts a short one by +83%, where the
+character rule takes over; the character rule alone leaves enough room for a
+residue when the caption asks for fast speech, where the no-condition
+prediction takes over.
+
+The correction only shortens, is applied per chunk, and is ignored when
+`duration_sec` is set. `min_duration_sec` / `max_duration_sec` still clamp the
+result. Its cost is one extra condition-encoder pass per chunk, reported as
+`irodori_tts.noref_condition_ms`.
+
+Shortening below the no-condition prediction makes the artifact come back, so
+the rule is not "shorter is safer" — the terms above are the calibrated bound.
 
 ## Session Options
 
