@@ -46,6 +46,16 @@ int main() try {
   engine::test::require_eq(irodori_speech_codepoints(""), int64_t{0},
                            "empty codepoints");
 
+  // The iteration mark, the closing mark and the ideographic zero sit in the
+  // CJK punctuation block but are read aloud. Dropping them would shorten the
+  // estimate and cut the clip short on repetition-heavy text.
+  engine::test::require_eq(irodori_speech_codepoints(u8"人々の時々の思い出"),
+                           int64_t{9}, "iteration marks are spoken");
+  engine::test::require_eq(irodori_speech_codepoints(u8"〆切は〇日"), int64_t{5},
+                           "closing mark and ideographic zero are spoken");
+  engine::test::require_eq(irodori_speech_codepoints(u8"「はい」、と。"),
+                           int64_t{2}, "brackets and punctuation are not");
+
   // 29 * 0.207 + 0.4
   engine::test::require_close(irodori_text_duration_estimate(medium, enabled),
                               6.403F, 0.001F, "medium text estimate");
